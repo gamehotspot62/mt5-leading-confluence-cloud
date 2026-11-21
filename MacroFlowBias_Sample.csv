@@ -1,0 +1,14 @@
+# Optional External Macro / On-Chain / ETF / COT Flow Bias Bridge for LeadingConfluencePro
+# Copy or write this file as: <MT5 Data Folder>\MQL5\Files\MacroFlowBias.csv
+# Format: SYMBOL,BIAS_SCORE,SOURCE_NOTE
+# BIAS_SCORE range: -100 (Extreme Bearish Macro/Outflow) to +100 (Extreme Bullish Macro/Inflow), 0 = Neutral
+SYMBOL,BIAS_SCORE,SOURCE_NOTE
+BTCUSD,42,ETF_Inflow_NegExNetflow_SOPR_Reset
+ETHUSD,28,ETF_Steady_Inflow_L2_Accumulation
+XAUUSD,55,CentralBank_Buying_ETF_Inflow_COT_Bull
+EURUSD,-20,RateSpread_COT_Commercial_Hedge
+GBPUSD,-10,COT_Neutral_Soft_Yield_Spread
+USDJPY,30,Carry_Flow_Positive_Yield_Spread
+US500,35,Breadth_Positive_ETF_Creations
+US100,40,Tech_ETF_Inflows_Low_Credit_Spread
+GLOBAL,15,Composite_Global_Liquidity_Positive

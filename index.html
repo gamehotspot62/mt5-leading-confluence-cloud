@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LeadingConfluencePro — 24/7 Cloud Macro & ML Dashboard</title>
+  <style>
+    :root {
+      --bg: #0b0f17;
+      --card: #131a26;
+      --border: #243044;
+      --text: #e6edf7;
+      --muted: #8ea0ba;
+      --green: #2ee59d;
+      --red: #ff5c72;
+      --blue: #4ea8ff;
+      --gold: #f5b942;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+      padding: 20px;
+    }
+    .container { max-width: 1360px; margin: 0 auto; }
+    header {
+      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+      gap: 14px; padding: 18px 22px; background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; margin-bottom: 18px;
+    }
+    h1 { margin: 0; font-size: 1.35rem; letter-spacing: 0.3px; }
+    .subtitle { color: var(--muted); font-size: 0.86rem; margin-top: 4px; }
+    .feed-links { display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn {
+      background: #1a2436; color: var(--blue); border: 1px solid var(--border);
+      padding: 7px 12px; border-radius: 8px; font-size: 0.82rem; text-decoration: none;
+      cursor: pointer; font-weight: 600;
+    }
+    .btn:hover { background: #223047; }
+    .grid-kpi {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(195px, 1fr));
+      gap: 12px; margin-bottom: 18px;
+    }
+    .kpi {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .kpi-label { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.6px; }
+    .kpi-val { font-size: 1.32rem; font-weight: 700; margin-top: 4px; }
+    .kpi-sub { font-size: 0.8rem; color: var(--muted); margin-top: 3px; }
+    .section {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 18px 20px; margin-bottom: 18px; overflow-x: auto;
+    }
+    .section h2 { margin: 0 0 12px 0; font-size: 1.05rem; color: #f2f6fc; }
+    .sig-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px;
+    }
+    .sig-card {
+      background: #0f1520; border: 1px solid var(--border); border-radius: 10px; padding: 14px;
+    }
+    .sig-buy { border-left: 4px solid var(--green); }
+    .sig-sell { border-left: 4px solid var(--red); }
+    .pill {
+      display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem;
+      font-weight: 700; background: #1c2638; color: var(--text);
+    }
+    .pill-bull { background: rgba(46,229,157,0.14); color: var(--green); }
+    .pill-bear { background: rgba(255,92,114,0.14); color: var(--red); }
+    .pill-warn { background: rgba(245,185,66,0.14); color: var(--gold); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { padding: 9px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+    th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    .pos { color: var(--green); font-weight: 600; }
+    .neg { color: var(--red); font-weight: 600; }
+    .neu { color: var(--muted); }
+    .feat-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; font-size: 0.83rem; }
+    .feat-name { width: 170px; color: var(--muted); font-family: monospace; }
+    .feat-bar-wrap { flex: 1; height: 10px; background: #0f1520; border-radius: 6px; overflow: hidden; }
+    .feat-bar { height: 100%; border-radius: 6px; }
+    .feat-val { width: 65px; text-align: right; font-family: monospace; }
+    .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 18px; }
+    footer { text-align: center; color: var(--muted); font-size: 0.8rem; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>LeadingConfluencePro v2.00 — 24/7 Cloud Quant & ML Intelligence</h1>
+        <div class="subtitle" id="timestamps">Loading cloud telemetry...</div>
+      </div>
+      <div class="feed-links">
+        <a class="btn" href="./data/MacroFlowBias.csv" target="_blank">MacroFlowBias.csv</a>
+        <a class="btn" href="./data/OptimizedConfig.csv" target="_blank">OptimizedConfig.csv</a>
+        <a class="btn" href="./data/MLModelWeights.csv" target="_blank">MLModelWeights.csv</a>
+        <button class="btn" onclick="loadAll()">Refresh</button>
+      </div>
+    </header>
+
+    <div class="grid-kpi" id="kpiGrid"></div>
+
+    <div class="section">
+      <h2>Live Closed-Bar Confirmed Signals (H1 / H4 Cloud Scanner)</h2>
+      <div id="signalsBox" class="neu">Loading latest signals...</div>
+    </div>
+
+    <div class="section">
+      <h2>Cross-Asset Watchlist — Live Microstructure + Macro / On-Chain / ETF / COT Matrix</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th><th>Class</th><th>Close (H1)</th><th>Macro Bias</th><th>Macro Driver</th>
+            <th>OFI</th><th>RVOL</th><th>VWAP-Z</th><th>KER</th><th>ATR Pct</th><th>HTF</th><th>Sqz</th><th>Gate / ML</th>
+          </tr>
+        </thead>
+        <tbody id="telemetryBody"></tbody>
+      </table>
+    </div>
+
+    <div class="two-col">
+      <div class="section">
+        <h2>Cloud ML Meta-Model Audit (Purged Walk-Forward OOS)</h2>
+        <div id="mlSummary">Loading ML report...</div>
+        <div id="featWeights" style="margin-top:14px;"></div>
+      </div>
+      <div class="section">
+        <h2>Cloud Walk-Forward Optimized Configs</h2>
+        <table>
+          <thead>
+            <tr><th>Symbol</th><th>TF</th><th>Score</th><th>VWAP</th><th>TP1/TP2</th><th>OOS Win%</th><th>OOS Exp(R)</th><th>Status</th></tr>
+          </thead>
+          <tbody id="cfgBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <footer>
+      Strictly causal closed-bar architecture &bull; Automated via GitHub Actions (zero local PC required) &bull;
+      MT5 Service syncs raw CSV feeds automatically every 5 minutes.
+    </footer>
+  </div>
+
+  <script>
+    const fmt = (v, d = 2) => (v === null || v === undefined || Number.isNaN(Number(v))) ? "—" : Number(v).toFixed(d);
+    const cls = (v) => Number(v) > 0 ? "pos" : (Number(v) < 0 ? "neg" : "neu");
+
+    async function loadAll() {
+      const bust = `?t=${Date.now()}`;
+      try {
+        const [macro, signals, ml] = await Promise.all([
+          fetch("./data/macro_snapshot.json" + bust).then(r => r.ok ? r.json() : null),
+          fetch("./data/latest_signals.json" + bust).then(r => r.ok ? r.json() : null),
+          fetch("./data/ml_report.json" + bust).then(r => r.ok ? r.json() : null),
+        ]);
+
+        document.getElementById("timestamps").textContent =
+          `Macro Sync: ${macro?.updated_utc || "—"} | Signal Scan: ${signals?.updated_utc || "—"} | ML Retrain: ${ml?.updated_utc || "—"}`;
+
+        renderKPIs(macro);
+        renderSignals(signals);
+        renderTelemetry(signals, macro);
+        renderML(ml);
+      } catch (e) {
+        document.getElementById("timestamps").textContent = "Error loading cloud JSON artifacts: " + e.message;
+      }
+    }
+
+    function renderKPIs(macro) {
+      const el = document.getElementById("kpiGrid");
+      if (!macro) { el.innerHTML = ""; return; }
+      const g = macro.global_regime || {};
+      const gb = macro.global_bias ?? 0;
+      const cards = [
+        { lbl: "Global Macro Bias", val: `${gb >= 0 ? "+" : ""}${gb}`, sub: gb >= 15 ? "Risk-On Liquidity" : (gb <= -15 ? "Risk-Off Defensive" : "Balanced Regime"), c: cls(gb) },
+        { lbl: "VIX / VIX3M Ratio", val: fmt(g.vix_vix3m_ratio, 3), sub: `${g.vix_state || "—"} (VIX ${fmt(g.vix,1)})`, c: (g.vix_vix3m_ratio && g.vix_vix3m_ratio < 1.0) ? "pos" : "neg" },
+        { lbl: "HY Credit OAS", val: g.hy_oas_pct != null ? `${fmt(g.hy_oas_pct,2)}%` : "—", sub: `20d chg: ${g.hy_oas_chg20 >= 0 ? "+" : ""}${fmt(g.hy_oas_chg20,2)}%`, c: cls(-g.hy_oas_chg20) },
+        { lbl: "Real 10Y TIPS Yield", val: g.real_10y_yield != null ? `${fmt(g.real_10y_yield,2)}%` : "—", sub: `20d chg: ${g.real_10y_chg20 >= 0 ? "+" : ""}${fmt(g.real_10y_chg20,2)}%`, c: cls(-g.real_10y_chg20) },
+        { lbl: "Net Fed Liquidity", val: g.fed_net_liq_trillion != null ? `$${fmt(g.fed_net_liq_trillion,3)}T` : "—", sub: `4w chg: ${g.fed_net_liq_4w_pct >= 0 ? "+" : ""}${fmt(g.fed_net_liq_4w_pct,2)}%`, c: cls(g.fed_net_liq_4w_pct) },
+        { lbl: "Crypto Liquidity & F&G", val: g.stablecoins ? `$${g.stablecoins.total_usd_b}B` : "—", sub: `Stable 30d: ${g.stablecoins ? (g.stablecoins.chg_30d_pct >= 0 ? "+" : "") + g.stablecoins.chg_30d_pct + "%" : "—"} | F&G: ${g.fear_greed?.value ?? "—"}`, c: cls(g.stablecoins?.chg_30d_pct || 0) }
+      ];
+      el.innerHTML = cards.map(k => `
+        <div class="kpi">
+          <div class="kpi-label">${k.lbl}</div>
+          <div class="kpi-val ${k.c}">${k.val}</div>
+          <div class="kpi-sub">${k.sub}</div>
+        </div>`).join("");
+    }
+
+    function renderSignals(signals) {
+      const box = document.getElementById("signalsBox");
+      const list = signals?.recent_confirmed_signals || [];
+      if (!list.length) {
+        box.innerHTML = `<div class="neu">No confirmed signals within the last 3 closed H1/H4 bars. Scanner runs automatically every hour on GitHub Actions.</div>`;
+        return;
+      }
+      box.innerHTML = `<div class="sig-grid">${list.map(s => {
+        const isBuy = s.direction === "BUY";
+        const mlTxt = s.ml_prob != null ? ` &bull; ML ${(s.ml_prob * 100).toFixed(0)}%` : "";
+        return `
+          <div class="sig-card ${isBuy ? "sig-buy" : "sig-sell"}">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <strong>${s.symbol} ${s.timeframe}</strong>
+              <span class="pill ${isBuy ? "pill-bull" : "pill-bear"}">${s.direction} (${s.playbook})</span>
+            </div>
+            <div style="font-size:0.82rem;color:var(--muted);margin-bottom:8px;">
+              Closed: ${s.bar_time_utc} &bull; Score <strong>${s.score}/100</strong>${mlTxt} &bull; Macro ${s.macro_bias >= 0 ? "+" : ""}${s.macro_bias}
+            </div>
+            <div style="font-family:monospace;font-size:0.83rem;">
+              Entry: ${s.entry} | SL: <span class="neg">${s.sl}</span><br/>
+              TP1: <span class="pos">${s.tp1}</span> | TP2: <span class="pos">${s.tp2}</span>
+            </div>
+          </div>`;
+      }).join("")}</div>`;
+    }
+
+    function renderTelemetry(signals, macro) {
+      const tb = document.getElementById("telemetryBody");
+      const rows = signals?.telemetry || [];
+      if (!rows.length) { tb.innerHTML = `<tr><td colspan="13" class="neu">No telemetry available yet.</td></tr>`; return; }
+      tb.innerHTML = rows.map(r => {
+        const mb = r.macro_bias ?? (macro?.symbols?.[r.symbol]?.bias_score ?? 0);
+        const htf = r.htf_bias > 0 ? `<span class="pos">BULL</span>` : (r.htf_bias < 0 ? `<span class="neg">BEAR</span>` : `<span class="neu">NEUT</span>`);
+        const sqz = r.sqz_on ? `<span class="pill pill-warn">ON</span>` : `<span class="neu">OFF</span>`;
+        return `<tr>
+          <td><strong>${r.symbol}</strong></td>
+          <td class="neu">${r.asset_class}</td>
+          <td style="font-family:monospace">${r.close}</td>
+          <td class="${cls(mb)}">${mb >= 0 ? "+" : ""}${mb}</td>
+          <td class="neu">${r.macro_note || "—"}</td>
+          <td class="${cls(r.ofi)}">${r.ofi >= 0 ? "+" : ""}${fmt(r.ofi,2)}</td>
+          <td>${fmt(r.rvol,2)}x</td>
+          <td class="${cls(r.vwap_z)}">${r.vwap_z >= 0 ? "+" : ""}${fmt(r.vwap_z,2)}</td>
+          <td>${fmt(r.ker,2)}</td>
+          <td>${fmt(r.atr_pct,0)}%</td>
+          <td>${htf}</td>
+          <td>${sqz}</td>
+          <td>${r.min_score}+ / ML ${(r.ml_min_prob*100).toFixed(0)}%</td>
+        </tr>`;
+      }).join("");
+    }
+
+    function renderML(ml) {
+      const sumEl = document.getElementById("mlSummary");
+      const fwEl = document.getElementById("featWeights");
+      const cfgEl = document.getElementById("cfgBody");
+      if (!ml) { sumEl.textContent = "ML report unavailable."; return; }
+      const g = ml.global_model || {};
+      sumEl.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:0.86rem;">
+          <div>Samples: <strong>${g.samples ?? "—"}</strong> (OOS ${g.oos_samples ?? "—"})</div>
+          <div>Active ML Gate: <strong>&ge; ${g.ml_min_prob ? (g.ml_min_prob * 100).toFixed(0) + "%" : "—"}</strong></div>
+          <div>Logistic OOS AUC: <strong>${g.auc_lr ?? "—"}</strong> (Brier ${g.brier_lr ?? "—"})</div>
+          <div>HistGB OOS AUC: <strong>${g.auc_gb ?? "—"}</strong> (Brier ${g.brier_gb ?? "—"})</div>
+          <div>Baseline OOS: <strong>${g.base_oos_win_pct ?? "—"}%</strong> / <span class="${cls(g.base_oos_exp_r)}">${g.base_oos_exp_r >= 0 ? "+" : ""}${g.base_oos_exp_r ?? "—"}R</span></div>
+          <div>ML-Filtered OOS: <strong>${g.ml_oos_win_pct ?? "—"}%</strong> / <span class="${cls(g.ml_oos_exp_r)}">${g.ml_oos_exp_r >= 0 ? "+" : ""}${g.ml_oos_exp_r ?? "—"}R</span></div>
+        </div>`;
+
+      const weights = ml.global_feature_weights || {};
+      const entries = Object.entries(weights).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+      const maxW = Math.max(0.25, ...entries.map(([, v]) => Math.abs(v)));
+      fwEl.innerHTML = `<div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px;">Standardized Logistic Feature Weights</div>` +
+        entries.map(([k, v]) => {
+          const pct = Math.min(100, Math.round(Math.abs(v) / maxW * 100));
+          const col = v >= 0 ? "var(--green)" : "var(--red)";
+          return `<div class="feat-row">
+            <div class="feat-name">${k}</div>
+            <div class="feat-bar-wrap"><div class="feat-bar" style="width:${pct}%;background:${col};"></div></div>
+            <div class="feat-val" style="color:${col}">${v >= 0 ? "+" : ""}${v.toFixed(3)}</div>
+          </div>`;
+        }).join("");
+
+      const cfgs = ml.optimized_configs || [];
+      cfgEl.innerHTML = cfgs.map(c => `<tr>
+        <td><strong>${c.SYMBOL}</strong></td>
+        <td>${c.TIMEFRAME}</td>
+        <td>${c.MIN_SCORE}+</td>
+        <td>${c.VWAP_PERIOD}</td>
+        <td>${c.TP1_MULT}/${c.TP2_MULT}R</td>
+        <td>${fmt(c.OOS_WIN_PCT,1)}%</td>
+        <td class="${cls(c.OOS_EXP_R)}">${c.OOS_EXP_R >= 0 ? "+" : ""}${fmt(c.OOS_EXP_R,3)}</td>
+        <td><span class="pill ${c.STATUS === "WF_OPTIMIZED" ? "pill-bull" : ""}">${c.STATUS}</span></td>
+      </tr>`).join("");
+    }
+
+    loadAll();
+  </script>
+</body>
+</html>
