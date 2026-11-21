@@ -103,10 +103,10 @@ def _eval_ml_prob(model: Optional[Dict[str, Any]], feats: List[float]) -> Option
     return float(1.0 / (1.0 + math.exp(-z)))
 
 
-def _resample_4h(df_1h: pd.DataFrame) -> pd.DataFrame:
-    tmp = df_1h.set_index("time")
+def _resample_1h(df_15m: pd.DataFrame) -> pd.DataFrame:
+    tmp = df_15m.set_index("time")
     return (
-        tmp.resample("4h", label="left", closed="left")
+        tmp.resample("1h", label="left", closed="left")
         .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
         .dropna(subset=["open", "high", "low", "close"])
         .reset_index()
@@ -170,21 +170,23 @@ def run_live_scan() -> Dict[str, Any]:
     new_alerts: List[Dict[str, Any]] = []
 
     for sym, meta in WATCHLIST.items():
-        df_1h = fetch_yahoo_ohlcv(meta["yahoo"], interval="1h", range_period="6mo")
-        if df_1h is None or len(df_1h) < 120:
+        df_15m = fetch_yahoo_ohlcv(meta["yahoo"], interval="15m", range_period="60d")
+        if df_15m is None or len(df_15m) < 160:
             continue
-        df_4h = _resample_4h(df_1h)
+        if len(df_15m) > 1400:
+            df_15m = df_15m.tail(1400).reset_index(drop=True)
+        df_1h = _resample_1h(df_15m)
 
         macro_val, macro_note = macro_map.get(sym, macro_map.get("GLOBAL", (0, "Neutral")))
         ml_model = ml_map.get(sym, ml_map.get("GLOBAL"))
 
-        for tf_name, tf_df in [("H1", df_1h), ("H4", df_4h)]:
+        for tf_name, tf_df, base_tf in [("M15", df_15m, "15m"), ("H1", df_1h, "1h")]:
             if len(tf_df) < 90:
                 continue
 
             cfg = cfg_map.get(
                 (sym, tf_name),
-                cfg_map.get((sym, "H1"), cfg_map.get(("GLOBAL", "ALL"), {})),
+                cfg_map.get((sym, "M15"), cfg_map.get((sym, "H1"), cfg_map.get(("GLOBAL", "ALL"), {}))),
             )
             params = EngineParams(
                 min_score=int(cfg.get("min_score", 68)),
@@ -202,17 +204,18 @@ def run_live_scan() -> Dict[str, Any]:
             res = compute_indicators_and_candidates(
                 tf_df,
                 params,
-                base_tf=("1h" if tf_name == "H1" else "4h"),
+                base_tf=base_tf,
                 macro_bias_arr=macro_arr,
                 use_macro_score=True,
             )
 
             last_closed_idx = len(tf_df) - 2
             st = res["state"]
-            if tf_name == "H1":
+            if tf_name == "M15":
                 watchlist_telemetry.append(
                     {
                         "symbol": sym,
+                        "timeframe": "M15",
                         "asset_class": meta["asset_class"],
                         "close": round(float(tf_df["close"].iloc[last_closed_idx]), 5),
                         "bar_time_utc": pd.Timestamp(tf_df["time"].iloc[last_closed_idx]).strftime("%Y-%m-%dT%H:%MZ"),

@@ -22,6 +22,16 @@ USER_AGENT = (
 )
 
 WATCHLIST: Dict[str, Dict[str, Any]] = {
+    "XAUUSD": {
+        "asset_class": "metals",
+        "yahoo": "GC=F",
+        "cot_dataset": "72hh-3qpy",
+        "cot_code": "088691",
+        "cot_invert": False,
+        "cm_asset": None,
+        "deribit_inst": None,
+        "etf_tickers": ["GLD"],
+    },
     "BTCUSD": {
         "asset_class": "crypto",
         "yahoo": "BTC-USD",
@@ -41,16 +51,6 @@ WATCHLIST: Dict[str, Dict[str, Any]] = {
         "cm_asset": "eth",
         "deribit_inst": "ETH-PERPETUAL",
         "etf_tickers": ["ETHA"],
-    },
-    "XAUUSD": {
-        "asset_class": "metals",
-        "yahoo": "GC=F",
-        "cot_dataset": "72hh-3qpy",
-        "cot_code": "088691",
-        "cot_invert": False,
-        "cm_asset": None,
-        "deribit_inst": None,
-        "etf_tickers": ["GLD"],
     },
     "XAGUSD": {
         "asset_class": "metals",
@@ -168,6 +168,8 @@ def fetch_yahoo_ohlcv(
     ranges_to_try = [range_period]
     if interval == "1h" and range_period == "730d":
         ranges_to_try.append("1y")
+    elif interval == "15m" and range_period == "60d":
+        ranges_to_try.append("30d")
 
     resp = None
     for rp in ranges_to_try:

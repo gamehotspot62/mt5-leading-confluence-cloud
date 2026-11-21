@@ -7,8 +7,8 @@
 //+------------------------------------------------------------------+
 #property copyright "LeadingConfluencePro Quantitative Architecture"
 #property link      "https://github.com/gamehotspot62/mt5-leading-confluence-cloud"
-#property version   "2.00"
-#property description "Universal non-repainting leading confluence indicator v2.00:"
+#property version   "2.01"
+#property description "Universal non-repainting leading confluence indicator v2.01:"
 #property description "1) BVC + CLV Order Flow Delta & CVD Divergence (microstructure)"
 #property description "2) Wyckoff Liquidity Sweep / SFP Reversal (behavioral stop hunts)"
 #property description "3) Bollinger-Keltner Volatility Squeeze & OLS Momentum"
@@ -411,17 +411,29 @@ string NormalizeSymbolKey(const string sym)
    string upper = orig;
    StringToUpper(upper);
 
-   int dotPos = StringFind(upper, ".");
-   if(dotPos > 0)
+   int sepPos = StringFind(upper, ".");
+   if(sepPos > 0)
    {
-      upper = StringSubstr(upper, 0, dotPos);
-      orig  = StringSubstr(orig, 0, dotPos);
+      upper = StringSubstr(upper, 0, sepPos);
+      orig  = StringSubstr(orig, 0, sepPos);
    }
-   int hashPos = StringFind(upper, "#");
-   if(hashPos > 0)
+   sepPos = StringFind(upper, "#");
+   if(sepPos > 0)
    {
-      upper = StringSubstr(upper, 0, hashPos);
-      orig  = StringSubstr(orig, 0, hashPos);
+      upper = StringSubstr(upper, 0, sepPos);
+      orig  = StringSubstr(orig, 0, sepPos);
+   }
+   sepPos = StringFind(upper, "_");
+   if(sepPos > 0)
+   {
+      upper = StringSubstr(upper, 0, sepPos);
+      orig  = StringSubstr(orig, 0, sepPos);
+   }
+   sepPos = StringFind(upper, "-");
+   if(sepPos > 0)
+   {
+      upper = StringSubstr(upper, 0, sepPos);
+      orig  = StringSubstr(orig, 0, sepPos);
    }
 
    // Strip common single lowercase broker suffix on >=7 char symbols (e.g. EURUSDm, XAUUSDc)
@@ -433,14 +445,20 @@ string NormalizeSymbolKey(const string sym)
          upper = StringSubstr(upper, 0, len - 1);
    }
 
-   // Map common broker aliases to canonical cloud universe keys
-   if(upper == "GOLD" || upper == "XAUUSD.PRO")                           return "XAUUSD";
-   if(upper == "SILVER")                                                  return "XAGUSD";
-   if(upper == "WTI" || upper == "CL" || upper == "XTIUSD" || upper == "USOUSD") return "USOIL";
-   if(upper == "USTEC" || upper == "NAS100" || upper == "NDX" || upper == "US100CASH") return "US100";
-   if(upper == "SPX500" || upper == "SP500" || upper == "US500CASH")      return "US500";
-   if(upper == "BTCUSDT" || upper == "BITCOIN")                           return "BTCUSD";
-   if(upper == "ETHUSDT" || upper == "ETHEREUM")                          return "ETHUSD";
+   // Map common broker aliases & substrings to canonical cloud universe keys
+   if(StringFind(upper, "XAUUSD") >= 0 || StringFind(upper, "GOLD") >= 0)   return "XAUUSD";
+   if(StringFind(upper, "XAGUSD") >= 0 || StringFind(upper, "SILVER") >= 0) return "XAGUSD";
+   if(StringFind(upper, "BTCUSD") >= 0 || upper == "BITCOIN")               return "BTCUSD";
+   if(StringFind(upper, "ETHUSD") >= 0 || upper == "ETHEREUM")              return "ETHUSD";
+   if(StringFind(upper, "EURUSD") >= 0)                                     return "EURUSD";
+   if(StringFind(upper, "GBPUSD") >= 0)                                     return "GBPUSD";
+   if(StringFind(upper, "USDJPY") >= 0)                                     return "USDJPY";
+   if(StringFind(upper, "WTI") >= 0 || StringFind(upper, "XTIUSD") >= 0 ||
+      StringFind(upper, "USOUSD") >= 0 || upper == "CL" || upper == "USOIL") return "USOIL";
+   if(StringFind(upper, "USTEC") >= 0 || StringFind(upper, "NAS100") >= 0 ||
+      StringFind(upper, "NDX") >= 0 || StringFind(upper, "US100") >= 0)    return "US100";
+   if(StringFind(upper, "SPX500") >= 0 || StringFind(upper, "SP500") >= 0 ||
+      StringFind(upper, "US500") >= 0)                                     return "US500";
 
    return upper;
 }

@@ -7,6 +7,7 @@ Outputs:
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from datetime import datetime, timezone
@@ -490,7 +491,34 @@ def run_macro_pipeline() -> Dict[str, Any]:
     return snapshot
 
 
+def _snapshot_is_fresh(max_age_minutes: int) -> bool:
+    if max_age_minutes <= 0:
+        return False
+    snap_path = DATA_DIR / "macro_snapshot.json"
+    csv_path = DATA_DIR / "MacroFlowBias.csv"
+    if not snap_path.exists() or not csv_path.exists():
+        return False
+    try:
+        meta = json.loads(snap_path.read_text(encoding="utf-8"))
+        ts = datetime.strptime(meta["updated_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        age_min = (datetime.now(timezone.utc) - ts).total_seconds() / 60.0
+        if age_min < max_age_minutes:
+            print(f"Macro snapshot is fresh ({age_min:.1f}m < {max_age_minutes}m); skipping external macro poll.")
+            return True
+    except Exception:
+        return False
+    return False
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Fetch live Macro, On-Chain, ETF & COT feeds.")
+    parser.add_argument("--if-older-than-minutes", type=int, default=0, help="Skip refresh if existing snapshot is newer than N minutes.")
+    parser.add_argument("--force", action="store_true", help="Force refresh regardless of age.")
+    args = parser.parse_args()
+
+    if not args.force and _snapshot_is_fresh(args.if_older_than_minutes):
+        raise SystemExit(0)
+
     snap = run_macro_pipeline()
     print(f"[{snap['updated_utc']}] Global Bias = {snap['global_bias']:+d}")
     for s, info in snap["symbols"].items():

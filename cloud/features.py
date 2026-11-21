@@ -48,9 +48,12 @@ class EngineParams:
 
 def resample_htf(df: pd.DataFrame, tf: str) -> Tuple[pd.DataFrame, int]:
     """
-    Resample base OHLCV ('1h' -> '4h', '4h' -> '1D', or '1d' -> '1W') and return (htf_df, htf_seconds).
+    Resample base OHLCV ('15m' -> '1h', '1h' -> '4h', '4h' -> '1D', or '1d' -> '1W')
+    and return (htf_df, htf_seconds).
     """
-    if tf == "1h":
+    if tf == "15m":
+        rule, htf_sec = "1h", 3600
+    elif tf == "1h":
         rule, htf_sec = "4h", 4 * 3600
     elif tf == "4h":
         rule, htf_sec = "1D", 86400
@@ -81,7 +84,7 @@ def compute_causal_htf_bias(
     if len(htf_df) < 10:
         return out
 
-    bar_sec = 3600 if base_tf == "1h" else (4 * 3600 if base_tf == "4h" else 86400)
+    bar_sec = 900 if base_tf == "15m" else (3600 if base_tf == "1h" else (4 * 3600 if base_tf == "4h" else 86400))
     hc = htf_df["close"].values.astype(float)
     hh = htf_df["high"].values.astype(float)
     hl = htf_df["low"].values.astype(float)

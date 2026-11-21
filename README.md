@@ -1,67 +1,61 @@
-# LeadingConfluencePro v2.00 — Autonomous Cloud Macro, ML Optimizer & MT5 System
+# LeadingConfluencePro v2.01 — 15-Minute (`M15`) & `XAUUSD` Cloud ML + MT5 Trading Ecosystem
 
-A universal, strictly non-repainting MetaTrader 5 indicator and **24/7 serverless cloud quantitative engine** built for **any symbol** (Forex, Metals, Energy, Indices, Crypto) and **any timeframe** (`M1` through `MN1`).
-
-It combines **leading on-chart microstructure** (BVC + CLV Order Flow, CVD Divergence, VSA, Wyckoff Liquidity Sweeps/SFP, Bollinger–Keltner Volatility Squeezes, FVG/Displacement, Adaptive VWAP, Kaufman Efficiency Ratio, ATR Percentile, Causal MTF) with **24/7 cloud-computed Macro / On-Chain / ETF / COT / Volatility Term-Structure feeds** and **Purged Walk-Forward ML Meta-Labeling** running completely without your laptop turned on.
+A universal, strictly non-repainting MetaTrader 5 indicator, 5-minute cloud sync service, optional `M15` auto-entry Expert Advisor, and **24/7 serverless cloud engine** checking signals **every 15 minutes** (`M15` + `H1`) with **`XAUUSD`** featured alongside Crypto, Forex, Energy, Metals, and Indices.
 
 ---
 
 ## Live Cloud Endpoints & Dashboard (`gamehotspot62/mt5-leading-confluence-cloud`)
 
-- **Live Web Dashboard (GitHub Pages):** `https://gamehotspot62.github.io/mt5-leading-confluence-cloud/`
-- **Macro / On-Chain / ETF / COT Bias Feed:** `https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/MacroFlowBias.csv`
-- **Cloud Walk-Forward Optimized Params:** `https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/OptimizedConfig.csv`
-- **Cloud Trained ML Meta-Model Weights:** `https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/MLModelWeights.csv`
-- **Live Closed-Bar Signals JSON:** `https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/latest_signals.json`
+- **Live Web Dashboard (GitHub Pages):** https://gamehotspot62.github.io/mt5-leading-confluence-cloud/
+- **Macro / On-Chain / ETF / COT Bias Feed:** https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/MacroFlowBias.csv
+- **Walk-Forward Optimized Settings (`M15`, `H1`, `D1`):** https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/OptimizedConfig.csv
+- **Trained ML Meta-Model Weights:** https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/MLModelWeights.csv
+- **Live 15-Minute Closed-Bar Signals JSON:** https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/latest_signals.json
 
 ---
 
 ## Project Files
 
-- [LeadingConfluencePro.mq5](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/LeadingConfluencePro.mq5) & [LeadingConfluencePro.ex5](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/LeadingConfluencePro.ex5) — Adaptive v2.00 MT5 indicator with native logistic ML meta-filter & 11 `iCustom` buffers.
-- [LeadingConfluenceCloudBridge.mq5](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/LeadingConfluenceCloudBridge.mq5) & [LeadingConfluenceCloudBridge.ex5](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/LeadingConfluenceCloudBridge.ex5) — MT5 background service syncing cloud CSVs & Terminal Global Variables every 5 minutes.
-- [index.html](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/index.html) — Live GitHub Pages dashboard visualizing macro stress, watchlist telemetry, confirmed signals, and ML audit metrics.
-- [RESEARCH_AND_DESIGN.md](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/RESEARCH_AND_DESIGN.md) — Complete research synthesis and mathematical specifications.
-- `cloud/`:
-  - [data_clients.py](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/cloud/data_clients.py) — Resilient keyless HTTP clients (Yahoo Finance v8, FRED, CFTC Socrata COT, CoinMetrics Community, Deribit, DefiLlama, Fear & Greed).
-  - [fetch_macro_data.py](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/cloud/fetch_macro_data.py) — Hourly macro/on-chain/ETF/COT aggregator.
-  - [features.py](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/cloud/features.py) — Exact causal Python mirror of MQL5 v2.00 indicators + 10 standardized ML features.
-  - [ml_optimizer.py](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/cloud/ml_optimizer.py) — Purged & embargoed walk-forward parameter optimizer + calibrated Logistic & HistGradientBoosting meta-labeler.
-  - [live_signal_scanner.py](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/cloud/live_signal_scanner.py) — Hourly cloud signal scanner with deduplicated Telegram/Discord notifications.
+- [LeadingConfluencePro.mq5](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/LeadingConfluencePro.mq5) & [LeadingConfluencePro.ex5](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/LeadingConfluencePro.ex5) — v2.01 non-repainting indicator (11 buffers including `MLProbBuffer`).
+- [LeadingConfluenceCloudBridge.mq5](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/LeadingConfluenceCloudBridge.mq5) & [LeadingConfluenceCloudBridge.ex5](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/LeadingConfluenceCloudBridge.ex5) — Background `#property service` polling cloud CSVs every 5 minutes into `MQL5\Files\` and Terminal Global Variables.
+- [LeadingConfluenceAutoEntry_M15.mq5](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/LeadingConfluenceAutoEntry_M15.mq5) & [LeadingConfluenceAutoEntry_M15.ex5](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/LeadingConfluenceAutoEntry_M15.ex5) — Optional `M15` auto-entry Expert Advisor reading closed-bar (`shift = 1`) signals via `iCustom`, sizing by `%` equity risk, and managing TP1 partial close + breakeven.
+- [index.html](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/index.html) — Live GitHub Pages dashboard showing `M15` telemetry, `M15`/`H1` signals, macro stress, and walk-forward ML audits.
+- [RESEARCH_AND_DESIGN.md](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/RESEARCH_AND_DESIGN.md) — Empirical research synthesis and mathematical specifications.
+- `cloud/` & `.github/workflows/` — 15-minute cloud signal scanner (`*/15 * * * *`), hourly macro refresh, and weekly purged walk-forward ML retraining.
 
 ---
 
-## MetaTrader 5 Installation & Cloud Sync Setup
+## MetaTrader 5 Installation (`XAUUSD M15` Quick Start)
 
 1. Open MetaTrader 5 → **File → Open Data Folder**.
-2. Copy `LeadingConfluencePro.ex5` (and optionally `.mq5`) into `MQL5\Indicators\`.
-3. Copy `LeadingConfluenceCloudBridge.ex5` (and optionally `.mq5`) into `MQL5\Services\`.
-4. Whitelist the GitHub raw HTTPS domain for `WebRequest`:
-   - Go to **Tools → Options → Expert Advisors**.
-   - Check **Allow WebRequest for listed URL**.
-   - Add **`https://raw.githubusercontent.com`** and click **OK**.
-5. Start the Cloud Sync Background Service:
-   - In MT5 **Navigator**, right-click **Services → Refresh**.
-   - Right-click **LeadingConfluenceCloudBridge** → **Add Service** → confirm settings → **OK**.
-   - Verify in the **Experts** tab: `LeadingConfluenceCloudBridge: Sync OK | Macro GVs=...`
-6. Drag **LeadingConfluencePro** onto any chart. It automatically reads cloud macro biases, walk-forward optimized parameters, and ML model weights whenever synced (and safely falls back to manual defaults on any symbol not in the watchlist).
-
-> **Note on Zero-Laptop Operation:** All cloud data harvesting, ML retraining, parameter optimization, web dashboard updates, and Telegram/Discord signal alerts run 24/7 on GitHub Actions even when your laptop is powered off. If you also want your **MT5 desktop terminal itself** (and MT5 push/trade execution) online 24/7 without keeping your laptop on, run MT5 + `LeadingConfluenceCloudBridge` on a Windows MT5 VPS.
+2. Copy files to your MT5 data folder:
+   - [LeadingConfluencePro.ex5](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/LeadingConfluencePro.ex5) → `MQL5\Indicators\`
+   - [LeadingConfluenceCloudBridge.ex5](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/LeadingConfluenceCloudBridge.ex5) → `MQL5\Services\`
+   - *(Optional Auto-Entry)* [LeadingConfluenceAutoEntry_M15.ex5](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/mt5-leading-confluence-indicator/LeadingConfluenceAutoEntry_M15.ex5) → `MQL5\Experts\`
+3. **Allow Cloud HTTPS Requests:** Go to **Tools → Options → Expert Advisors**, check **Allow WebRequest for listed URL**, and add **`https://raw.githubusercontent.com`**.
+4. **Start the Cloud Bridge Service:** In MT5 **Navigator → Services → Refresh**, right-click **LeadingConfluenceCloudBridge → Add Service** → **OK**. Confirm `Sync OK` appears in the **Experts** tab.
+5. **Attach to `XAUUSD` `M15` Chart:** Open an `XAUUSD` chart on the **`M15`** timeframe and drag **LeadingConfluencePro** onto it. Broker symbol variants (`XAUUSDm`, `XAUUSD.raw`, `XAUUSD_i`, `GOLD`) are normalized automatically to `XAUUSD,M15`.
+6. *(Optional)* Attach **LeadingConfluenceAutoEntry_M15** to the same `XAUUSD M15` chart (`InpDryRunLogOnly = true` first on Demo/Strategy Tester before enabling live `OrderSend`).
 
 ---
 
-## Optional Zero-Laptop Telegram / Discord Cloud Alerts
+## How It Works (End-to-End Methodology)
 
-To receive confirmed `H1`/`H4` Buy/Sell signals directly on your phone even when MT5 and your laptop are off:
-1. Open your GitHub repository `gamehotspot62/mt5-leading-confluence-cloud` → **Settings → Secrets and variables → Actions**.
-2. Add any of:
-   - `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`
-   - `DISCORD_WEBHOOK_URL`
-3. The hourly workflow (`live_data_and_signals.yml`) automatically pushes deduplicated closed-bar signals whenever a new setup confirms.
+1. **Cloud Layer (Zero Laptop Needed, 24/7):**
+   - Every **15 minutes**, GitHub Actions refreshes macro/flow data (if older than 50 min: `VIX/VIX3M`, FRED/Treasury credit & real yields, `GLD`/ETF flows, CFTC COT, CoinMetrics, Deribit, DefiLlama, Fear & Greed) and runs `cloud/live_signal_scanner.py` across closed **`M15`** and **`H1`** candles for `XAUUSD` and the 9 other assets, sending Telegram/Discord alerts if secrets are configured.
+   - Weekly, `cloud/ml_optimizer.py` runs **Triple-Barrier labeling** and **Purged Walk-Forward Cross-Validation** on `M15`, `H1`, and `D1` history, writing tuned parameters to `OptimizedConfig.csv` and calibrated logistic meta-model weights to `MLModelWeights.csv`.
+2. **MT5 Cloud Sync Service (`LeadingConfluenceCloudBridge`):**
+   - Runs on an independent background thread (avoiding MT5's `OnCalculate` error `4014` network restriction), polling the raw GitHub CSVs every 5 minutes into `MQL5\Files\` and `MACRO_BIAS_*` Terminal Global Variables.
+3. **Live On-Chart Signal Engine (`LeadingConfluencePro` v2.01):**
+   - **Parameter & ML Adoption:** Every 60 seconds, refreshes `OptimizedConfig.csv` (matching `(EXACT_SYM, EXACT_TF)` → `(NORM_SYM, EXACT_TF)` → `(NORM_SYM, ALL)` → `(GLOBAL, ALL)`), `MacroFlowBias.csv`, and `MLModelWeights.csv`. If an optimized parameter changes, triggers one clean recalculation.
+   - **Real-Time Closed-Bar Catching:** Computes BVC + CLV Order Flow (`OFI`), `CVD`, `RVOL`, Rolling/Session `VWAP` ± bands, BB-inside-KC Squeeze + OLS Momentum, `KER`, 100-bar `ATR` percentile, `FVG`/Displacement, causal swing pivots (`p = i - 3`), and strictly completed `H1` macro bias (`htfCloseTime <= barCloseTime`).
+   - **Zero-Repainting Gate:** Live bar (`rates_total - 1`) signal buffers are always forced empty (`EMPTY_VALUE` / `0.0`). Only when a 15-minute bar closes (`rates_total - 2`) does it score the 3 playbooks (`Sweep/SFP`, `SqzBreak`, `VWAPPull`) out of 100, run the native 10-feature logistic ML probability check (`EvaluateMLWinProb >= ML_MIN_PROB`), stamp the Buy/Sell arrow with `SL`/`TP1`/`TP2`, and fire a once-per-bar alert.
+4. **Optional Auto-Entry EA (`LeadingConfluenceAutoEntry_M15`):**
+   - Polls `iCustom` strictly at **`shift = 1`** (newly closed `M15` bar), checks spread and risk-based lot sizing (`0.5%` equity default), sends the market order with `SL` and `TP2`, and manages `50%` partial close + breakeven stop move once `TP1` is reached.
 
 ---
 
-## `iCustom()` Buffer Map (v2.00 — 11 Buffers)
+## `iCustom()` Buffer Map (v2.01 — 11 Buffers)
 
 | Buffer Index | Name | Values |
 | :---: | :--- | :--- |
@@ -76,5 +70,3 @@ To receive confirmed `H1`/`H4` Buy/Sell signals directly on your phone even when
 | `8` | `TP2Buffer` | Projected TP2 price on signal bar, else `EMPTY_VALUE` |
 | `9` | `RegimeBuffer` | Smoothed Kaufman Efficiency Ratio (`0.0..1.0`) |
 | `10` | `MLProbBuffer` | Calibrated Cloud ML win probability (`0.0..1.0`) on signal bar, else `0.0` |
-
-> **EA Integration Tip:** Always read signal buffers from shift **`1`** (latest closed bar) and never from shift `0`.

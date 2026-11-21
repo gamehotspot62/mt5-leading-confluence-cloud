@@ -2,7 +2,7 @@ name: Cloud Live Macro, On-Chain, ETF, COT & Signal Scanner
 
 on:
   schedule:
-    - cron: "10 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -31,10 +31,15 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r cloud/requirements.txt
 
-      - name: Fetch live Macro, On-Chain, ETF, COT & Volatility Term Structure
-        run: python cloud/fetch_macro_data.py
+      - name: Fetch live Macro, On-Chain, ETF, COT & Volatility Term Structure (hourly refresh)
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            python cloud/fetch_macro_data.py --force
+          else
+            python cloud/fetch_macro_data.py --if-older-than-minutes 50
+          fi
 
-      - name: Run 24/7 Closed-Bar Signal Scanner & Optional Alerts
+      - name: Run 24/7 15-Minute Closed-Bar Signal Scanner & Optional Alerts
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

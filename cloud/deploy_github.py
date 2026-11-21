@@ -32,6 +32,8 @@ ALLOWED_PATHS = [
     "LeadingConfluencePro.ex5",
     "LeadingConfluenceCloudBridge.mq5",
     "LeadingConfluenceCloudBridge.ex5",
+    "LeadingConfluenceAutoEntry_M15.mq5",
+    "LeadingConfluenceAutoEntry_M15.ex5",
     "index.html",
     "README.md",
     "RESEARCH_AND_DESIGN.md",

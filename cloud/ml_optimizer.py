@@ -442,11 +442,11 @@ def optimize_symbol_timeframe(
         df, ml_params, base_tf=base_tf, macro_bias_arr=macro_arr, use_macro_score=True
     )
     ml_ev = label_candidates(df, ml_res["candidates"], ml_params.tp1_mult, ml_params.tp2_mult)
+    tf_label = "M15" if base_tf == "15m" else ("H1" if base_tf == "1h" else "D1")
     if not ml_ev.empty:
         ml_ev["symbol"] = sym
-        ml_ev["timeframe"] = "H1" if base_tf == "1h" else "D1"
+        ml_ev["timeframe"] = tf_label
 
-    tf_label = "H1" if base_tf == "1h" else "D1"
     if best_eval is not None and best_eval["trades"] >= 12 and best_eval["exp_r"] > 0.0:
         row = {
             "SYMBOL": sym,
@@ -640,13 +640,13 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
         m_series = macro_hist.get(sym, macro_hist.get("GLOBAL"))
         per_sym_events[sym] = []
 
-        for tf, range_p in [("1h", "730d"), ("1d", "5y")]:
+        for tf, range_p in [("15m", "60d"), ("1h", "730d"), ("1d", "5y")]:
             print(f"Downloading & optimizing {sym} ({ticker}) [{tf}]...", flush=True)
             df = fetch_yahoo_ohlcv(ticker, interval=tf, range_period=range_p)
-            if df is not None and tf == "1h" and len(df) > 4500:
-                df = df.tail(4500).reset_index(drop=True)
+            if df is not None and tf in ("15m", "1h") and len(df) > 3500:
+                df = df.tail(3500).reset_index(drop=True)
             if df is None or len(df) < 120:
-                tf_lbl = "H1" if tf == "1h" else "D1"
+                tf_lbl = "M15" if tf == "15m" else ("H1" if tf == "1h" else "D1")
                 opt_rows.append(
                     {
                         "SYMBOL": sym,
