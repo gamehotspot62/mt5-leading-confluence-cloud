@@ -59,7 +59,7 @@ jobs:
             git stash drop
             git add data/
             if ! git diff --staged --quiet; then
-              git commit -m "chore(cloud): update live macro bias & closed-bar signals [skip ci]"
+              git commit -m "chore(cloud): update live macro bias & closed-bar signals"
               git push origin main
             fi
           else

@@ -57,7 +57,7 @@ jobs:
             git stash drop
             git add data/
             if ! git diff --staged --quiet; then
-              git commit -m "chore(ml): retrain purged walk-forward meta-model & optimize params [skip ci]"
+              git commit -m "chore(ml): retrain purged walk-forward meta-model & optimize params"
               git push origin main
             fi
           else
