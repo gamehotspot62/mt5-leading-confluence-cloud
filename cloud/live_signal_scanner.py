@@ -113,6 +113,25 @@ def _resample_1h(df_15m: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _trim_to_closed_bars(df: pd.DataFrame, bar_minutes: int, now_utc: pd.Timestamp) -> pd.DataFrame:
+    """Filter to strictly closed grid-aligned bars and strip flat zero-volume post-close ticks."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    closed = df[df["time"] + pd.Timedelta(minutes=bar_minutes) <= now_utc].copy()
+    if bar_minutes == 15 and not closed.empty:
+        closed = closed[(closed["time"].dt.second == 0) & (closed["time"].dt.minute % 15 == 0)].copy()
+    closed = closed.reset_index(drop=True)
+    trimmed = 0
+    while trimmed < 3 and len(closed) > 95:
+        last_row = closed.iloc[-1]
+        if float(last_row["high"]) == float(last_row["low"]) and float(last_row["volume"]) <= 1.0:
+            closed = closed.iloc[:-1]
+            trimmed += 1
+        else:
+            break
+    return closed.reset_index(drop=True)
+
+
 def _send_notifications(new_alerts: List[Dict[str, Any]]) -> None:
     if not new_alerts:
         return
@@ -133,13 +152,19 @@ def _send_notifications(new_alerts: List[Dict[str, Any]]) -> None:
 
     if tg_token and tg_chat:
         try:
-            requests.post(
+            resp = requests.post(
                 f"https://api.telegram.org/bot{tg_token}/sendMessage",
                 json={"chat_id": tg_chat, "text": text_msg, "parse_mode": "Markdown"},
                 timeout=10,
             )
-        except Exception:
-            pass
+            ok_val = None
+            try:
+                ok_val = resp.json().get("ok")
+            except Exception:
+                pass
+            print(f"Telegram notify HTTP {resp.status_code} ok={ok_val}")
+        except Exception as exc:
+            print(f"Telegram notify error: {type(exc).__name__}")
 
     if discord_url:
         try:
@@ -150,7 +175,8 @@ def _send_notifications(new_alerts: List[Dict[str, Any]]) -> None:
 
 def run_live_scan() -> Dict[str, Any]:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now_dt = pd.Timestamp(datetime.now(timezone.utc))
+    now_iso = now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     macro_map = _load_macro_bias_map()
     cfg_map = _load_optimized_configs()
@@ -170,12 +196,21 @@ def run_live_scan() -> Dict[str, Any]:
     new_alerts: List[Dict[str, Any]] = []
 
     for sym, meta in WATCHLIST.items():
-        df_15m = fetch_yahoo_ohlcv(meta["yahoo"], interval="15m", range_period="60d")
-        if df_15m is None or len(df_15m) < 160:
+        df_15m_raw = fetch_yahoo_ohlcv(meta["yahoo"], interval="15m", range_period="60d")
+        if df_15m_raw is None or df_15m_raw.empty:
+            continue
+
+        raw_last_time = pd.Timestamp(df_15m_raw["time"].iloc[-1])
+        live_price = round(float(df_15m_raw["close"].iloc[-1]), 5)
+        live_time_utc = raw_last_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        market_open = bool((now_dt - raw_last_time).total_seconds() <= 35 * 60)
+
+        df_15m = _trim_to_closed_bars(df_15m_raw, 15, now_dt)
+        if len(df_15m) < 160:
             continue
         if len(df_15m) > 1400:
             df_15m = df_15m.tail(1400).reset_index(drop=True)
-        df_1h = _resample_1h(df_15m)
+        df_1h = _trim_to_closed_bars(_resample_1h(df_15m), 60, now_dt)
 
         macro_val, macro_note = macro_map.get(sym, macro_map.get("GLOBAL", (0, "Neutral")))
         ml_model = ml_map.get(sym, ml_map.get("GLOBAL"))
@@ -207,9 +242,10 @@ def run_live_scan() -> Dict[str, Any]:
                 base_tf=base_tf,
                 macro_bias_arr=macro_arr,
                 use_macro_score=True,
+                include_last_bar=True,
             )
 
-            last_closed_idx = len(tf_df) - 2
+            last_closed_idx = len(tf_df) - 1
             st = res["state"]
             if tf_name == "M15":
                 watchlist_telemetry.append(
@@ -218,6 +254,9 @@ def run_live_scan() -> Dict[str, Any]:
                         "timeframe": "M15",
                         "asset_class": meta["asset_class"],
                         "close": round(float(tf_df["close"].iloc[last_closed_idx]), 5),
+                        "live_price": live_price,
+                        "live_time_utc": live_time_utc,
+                        "market_open": market_open,
                         "bar_time_utc": pd.Timestamp(tf_df["time"].iloc[last_closed_idx]).strftime("%Y-%m-%dT%H:%MZ"),
                         "macro_bias": int(macro_val),
                         "macro_note": macro_note,

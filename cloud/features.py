@@ -131,6 +131,7 @@ def compute_indicators_and_candidates(
     base_tf: str = "1h",
     macro_bias_arr: Optional[np.ndarray] = None,
     use_macro_score: bool = False,
+    include_last_bar: bool = False,
 ) -> Dict[str, Any]:
     """
     Compute all LeadingConfluencePro v2.00 continuous state arrays AND closed-bar
@@ -307,7 +308,8 @@ def compute_indicators_and_candidates(
     buy_reset = 1
     sell_reset = 1
 
-    for i in range(1, max(1, n - 1)):
+    eval_end = n if include_last_bar else max(1, n - 1)
+    for i in range(1, eval_end):
         if c[i] < vwap_val[i]:
             buy_reset = 1
         if c[i] > vwap_val[i]:
