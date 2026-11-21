@@ -98,7 +98,7 @@
         <a class="btn" href="https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/MacroFlowBias.csv" target="_blank">MacroFlowBias.csv</a>
         <a class="btn" href="https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/OptimizedConfig.csv" target="_blank">OptimizedConfig.csv</a>
         <a class="btn" href="https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/MLModelWeights.csv" target="_blank">MLModelWeights.csv</a>
-        <button class="btn" onclick="loadAll()">Refresh</button>
+        <button class="btn" id="refreshBtn" onclick="loadAll(true)">Refresh</button>
       </div>
     </header>
 
@@ -111,12 +111,15 @@
 
     <div class="section">
       <h2>Cross-Asset Watchlist — Live M15 Microstructure + Macro / On-Chain / ETF / COT Matrix</h2>
+      <div id="marketNotice" style="display:none;margin-bottom:12px;padding:10px 14px;border-radius:8px;background:rgba(245,185,66,0.10);border:1px solid rgba(245,185,66,0.35);color:var(--gold);font-size:0.84rem;"></div>
       <table>
         <thead>
           <tr>
             <th>Symbol</th>
             <th>Class</th>
+            <th>Status</th>
             <th>Close (M15)</th>
+            <th>Bar (UTC)</th>
             <th title="Composite Macro/On-Chain/ETF/COT bias [-100..+100]">Macro Bias</th>
             <th title="Top macro/flow drivers active for this symbol">Macro Driver</th>
             <th title="Order Flow Imbalance [-1..+1]: 60% BVC + 40% CLV">OFI</th>
@@ -182,21 +185,56 @@
     const fmt = (v, d = 2) => (v === null || v === undefined || Number.isNaN(Number(v))) ? "—" : Number(v).toFixed(d);
     const cls = (v) => Number(v) > 0 ? "pos" : (Number(v) < 0 ? "neg" : "neu");
 
-    const DATA_BASE = location.hostname.endsWith("github.io")
-      ? "https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data"
-      : "./data";
-
-    async function loadAll() {
-      const bust = `?t=${Date.now()}`;
+    async function resolveDataBase() {
+      if (!location.hostname.endsWith("github.io")) {
+        return { base: "./data", sha: "local", bust: `?t=${Date.now()}` };
+      }
       try {
+        const r = await fetch(
+          "https://api.github.com/repos/gamehotspot62/mt5-leading-confluence-cloud/commits/main",
+          { headers: { Accept: "application/vnd.github.sha" }, cache: "no-store" }
+        );
+        if (r.ok) {
+          const sha = (await r.text()).trim();
+          if (/^[0-9a-f]{40}$/i.test(sha)) {
+            return {
+              base: `https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/${sha}/data`,
+              sha: sha.slice(0, 7),
+              bust: "",
+            };
+          }
+        }
+      } catch (_) {}
+      return {
+        base: "https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data",
+        sha: "main",
+        bust: `?t=${Date.now()}`,
+      };
+    }
+
+    async function loadAll(manual = false) {
+      const btn = document.getElementById("refreshBtn");
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Refreshing...";
+      }
+      try {
+        const ref = await resolveDataBase();
+        const opts = { cache: "no-store" };
         const [macro, signals, ml] = await Promise.all([
-          fetch(`${DATA_BASE}/macro_snapshot.json${bust}`).then(r => r.ok ? r.json() : null),
-          fetch(`${DATA_BASE}/latest_signals.json${bust}`).then(r => r.ok ? r.json() : null),
-          fetch(`${DATA_BASE}/ml_report.json${bust}`).then(r => r.ok ? r.json() : null),
+          fetch(`${ref.base}/macro_snapshot.json${ref.bust}`, opts).then(r => r.ok ? r.json() : null),
+          fetch(`${ref.base}/latest_signals.json${ref.bust}`, opts).then(r => r.ok ? r.json() : null),
+          fetch(`${ref.base}/ml_report.json${ref.bust}`, opts).then(r => r.ok ? r.json() : null),
         ]);
 
+        let ageTxt = "—";
+        if (signals?.updated_utc) {
+          const ageMin = Math.max(0, Math.round((Date.now() - Date.parse(signals.updated_utc)) / 60000));
+          ageTxt = `${ageMin}m ago`;
+        }
+        const checkedLocal = new Date().toLocaleTimeString();
         document.getElementById("timestamps").textContent =
-          `Macro Sync: ${macro?.updated_utc || "—"} | Signal Scan: ${signals?.updated_utc || "—"} | ML Retrain: ${ml?.updated_utc || "—"}`;
+          `Macro Sync: ${macro?.updated_utc || "—"} | Signal Scan: ${signals?.updated_utc || "—"} (${ageTxt}) | ML Retrain: ${ml?.updated_utc || "—"} | Checked: ${checkedLocal} (${ref.sha}) • Auto: 2m`;
 
         renderKPIs(macro);
         renderSignals(signals);
@@ -204,6 +242,11 @@
         renderML(ml);
       } catch (e) {
         document.getElementById("timestamps").textContent = "Error loading cloud JSON artifacts: " + e.message;
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "Refresh";
+        }
       }
     }
 
@@ -257,16 +300,29 @@
 
     function renderTelemetry(signals, macro) {
       const tb = document.getElementById("telemetryBody");
+      const notice = document.getElementById("marketNotice");
       const rows = signals?.telemetry || [];
-      if (!rows.length) { tb.innerHTML = `<tr><td colspan="13" class="neu">No telemetry available yet.</td></tr>`; return; }
+      if (!rows.length) {
+        if (notice) notice.style.display = "none";
+        tb.innerHTML = `<tr><td colspan="15" class="neu">No telemetry available yet.</td></tr>`;
+        return;
+      }
+      let closedCount = 0;
       tb.innerHTML = rows.map(r => {
         const mb = r.macro_bias ?? (macro?.symbols?.[r.symbol]?.bias_score ?? 0);
         const htf = r.htf_bias > 0 ? `<span class="pos">BULL</span>` : (r.htf_bias < 0 ? `<span class="neg">BEAR</span>` : `<span class="neu">NEUT</span>`);
         const sqz = r.sqz_on ? `<span class="pill pill-warn">ON</span>` : `<span class="neu">OFF</span>`;
+        const isOpen = (typeof r.market_open === "boolean") ? r.market_open : (r.bar_time_utc ? ((Date.now() - Date.parse(r.bar_time_utc)) < 45 * 60000) : false);
+        if (!isOpen) closedCount++;
+        const statusBadge = isOpen ? `<span class="pill pill-bull">LIVE</span>` : `<span class="pill">CLOSED</span>`;
+        const liveSub = (isOpen && r.live_price != null) ? `<div style="font-size:0.74rem;color:var(--muted)">Live: ${r.live_price}</div>` : "";
+        const barTxt = r.bar_time_utc ? r.bar_time_utc.slice(5) : "—";
         return `<tr>
           <td><strong>${r.symbol}</strong></td>
           <td class="neu">${r.asset_class}</td>
-          <td style="font-family:monospace">${r.close}</td>
+          <td>${statusBadge}</td>
+          <td style="font-family:monospace">${r.close}${liveSub}</td>
+          <td class="neu" style="font-family:monospace;font-size:0.78rem">${barTxt}</td>
           <td class="${cls(mb)}">${mb >= 0 ? "+" : ""}${mb}</td>
           <td class="neu">${r.macro_note || "—"}</td>
           <td class="${cls(r.ofi)}">${r.ofi >= 0 ? "+" : ""}${fmt(r.ofi,2)}</td>
@@ -279,6 +335,14 @@
           <td>${r.min_score}+ / ML ${(r.ml_min_prob*100).toFixed(0)}%</td>
         </tr>`;
       }).join("");
+      if (notice) {
+        if (closedCount >= 5) {
+          notice.style.display = "block";
+          notice.textContent = `Notice: ${closedCount} of ${rows.length} symbols are currently outside market hours (weekend / session close) and display their last closed M15 session bar. 24/7 Crypto feeds (BTCUSD, ETHUSD) continue updating on every ~15-minute cloud scan.`;
+        } else {
+          notice.style.display = "none";
+        }
+      }
     }
 
     function renderML(ml) {
@@ -324,7 +388,8 @@
       </tr>`).join("");
     }
 
-    loadAll();
+    loadAll(false);
+    setInterval(() => loadAll(false), 120000);
   </script>
 </body>
 </html>
