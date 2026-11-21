@@ -78,6 +78,12 @@
     .pos { color: var(--green); font-weight: 600; }
     .neg { color: var(--red); font-weight: 600; }
     .neu { color: var(--muted); }
+    .tick-up { color: var(--green); font-weight: 700; }
+    .tick-dn { color: var(--red); font-weight: 700; }
+    .live-dot {
+      display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--green); margin-right: 5px; vertical-align: middle;
+    }
     .feat-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; font-size: 0.83rem; }
     .feat-name { width: 170px; color: var(--muted); font-family: monospace; }
     .feat-bar-wrap { flex: 1; height: 10px; background: #0f1520; border-radius: 6px; overflow: hidden; }
@@ -185,6 +191,320 @@
     const fmt = (v, d = 2) => (v === null || v === undefined || Number.isNaN(Number(v))) ? "—" : Number(v).toFixed(d);
     const cls = (v) => Number(v) > 0 ? "pos" : (Number(v) < 0 ? "neg" : "neu");
 
+    const liveState = {
+      macro: null,
+      signals: null,
+      ml: null,
+      refSha: "—",
+      checkedLocal: "—",
+      liveMicro: {},
+      liveSpot: {},
+      liveFng: null,
+      liveFunding: {},
+      lastTickLocal: "—",
+    };
+
+    const CRYPTO_BINANCE_PAIRS = [
+      { sym: "BTCUSD", pair: "BTCUSDT", deribit: "BTC-PERPETUAL" },
+      { sym: "ETHUSD", pair: "ETHUSDT", deribit: "ETH-PERPETUAL" },
+    ];
+
+    function erfApprox(x) {
+      const sign = x >= 0 ? 1 : -1;
+      const ax = Math.abs(x);
+      const t = 1.0 / (1.0 + 0.3275911 * ax);
+      const y = 1.0 - (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t) * Math.exp(-ax * ax);
+      return sign * y;
+    }
+
+    function ndtr(x) {
+      return 0.5 * (1.0 + erfApprox(x / Math.SQRT2));
+    }
+
+    function getVwapPeriod(sym) {
+      const cfgs = liveState.ml?.optimized_configs || [];
+      const m = cfgs.find(c => String(c.SYMBOL).toUpperCase() === sym && String(c.TIMEFRAME).toUpperCase() === "M15");
+      return m ? Math.max(5, Number(m.VWAP_PERIOD) || 50) : 50;
+    }
+
+    function computeMicrostructure(bars15m, bars1h, vwapPeriod = 50) {
+      const n = bars15m.length;
+      if (n < 60) return null;
+
+      const atrPeriod = 14, volPeriod = 20, sqzPeriod = 20, kerPeriod = 10, bbMult = 2.0, kcMult = 1.5;
+      const alphaFast = 2.0 / (sqzPeriod + 1.0);
+      const atr = new Float64Array(n);
+      const atrPct = new Float64Array(n).fill(50.0);
+      const rvol = new Float64Array(n).fill(1.0);
+      const emaFast = new Float64Array(n);
+      const ofi = new Float64Array(n);
+      const vwapZ = new Float64Array(n);
+      const sqzOn = new Int32Array(n);
+      const kerRaw = new Float64Array(n);
+      const kerSmooth = new Float64Array(n);
+
+      for (let i = 0; i < n; i++) {
+        const bi = bars15m[i];
+        const vi = Math.max(bi.v, 1.0);
+        if (i > 0) {
+          const vs = Math.max(0, i - volPeriod);
+          let sumV = 0;
+          for (let k = vs; k < i; k++) sumV += Math.max(bars15m[k].v, 1.0);
+          const avgV = (i > vs) ? (sumV / (i - vs)) : vi;
+          rvol[i] = vi / Math.max(avgV, 1.0);
+        }
+
+        let tr = bi.h - bi.l;
+        if (i > 0) {
+          const pc = bars15m[i - 1].c;
+          tr = Math.max(tr, Math.abs(bi.h - pc), Math.abs(bi.l - pc));
+        }
+        if (i === 0) atr[i] = tr;
+        else if (i < atrPeriod) atr[i] = (atr[i - 1] * i + tr) / (i + 1);
+        else atr[i] = (atr[i - 1] * (atrPeriod - 1) + tr) / atrPeriod;
+
+        if (i >= 20) {
+          const as = Math.max(0, i - 99);
+          let leq = 0;
+          for (let k = as; k <= i; k++) if (atr[k] <= atr[i]) leq++;
+          atrPct[i] = 100.0 * leq / (i - as + 1);
+        }
+
+        emaFast[i] = (i === 0) ? bi.c : (alphaFast * bi.c + (1.0 - alphaFast) * emaFast[i - 1]);
+
+        let bvcNet = 0.0;
+        if (i > 1) {
+          const dpS = Math.max(1, i - 19);
+          const dp = [];
+          let sumDp = 0;
+          for (let k = dpS; k <= i; k++) {
+            const d = bars15m[k].c - bars15m[k - 1].c;
+            dp.push(d);
+            sumDp += d;
+          }
+          const meanDp = sumDp / dp.length;
+          let varDp = 0;
+          for (let k = 0; k < dp.length; k++) varDp += (dp[k] - meanDp) ** 2;
+          const sigDp = Math.sqrt(varDp / dp.length);
+          if (sigDp > 1e-12) {
+            const zDp = Math.max(-8.0, Math.min(8.0, (bi.c - bars15m[i - 1].c) / sigDp));
+            bvcNet = 2.0 * ndtr(zDp) - 1.0;
+          }
+        }
+        const rng = bi.h - bi.l;
+        const clv = rng > 1e-12 ? (((bi.c - bi.l) - (bi.h - bi.c)) / rng) : 0.0;
+        ofi[i] = 0.60 * bvcNet + 0.40 * clv;
+
+        const vwS = Math.max(0, i - Math.max(5, vwapPeriod) + 1);
+        let sumTpV = 0, sumVw = 0;
+        for (let k = vwS; k <= i; k++) {
+          const bk = bars15m[k];
+          const tpk = (bk.h + bk.l + bk.c) / 3.0;
+          const vk = Math.max(bk.v, 1.0);
+          sumTpV += tpk * vk;
+          sumVw += vk;
+        }
+        const vw = sumVw > 0 ? (sumTpV / sumVw) : bi.c;
+        let varVw = 0;
+        if (sumVw > 0) {
+          for (let k = vwS; k <= i; k++) {
+            const bk = bars15m[k];
+            const tpk = (bk.h + bk.l + bk.c) / 3.0;
+            const vk = Math.max(bk.v, 1.0);
+            varVw += vk * ((tpk - vw) ** 2);
+          }
+        }
+        const vstd = sumVw > 0 ? Math.sqrt(varVw / sumVw) : 0.0;
+        const zDen = Math.max(vstd, 0.25 * atr[i]);
+        vwapZ[i] = zDen > 1e-12 ? ((bi.c - vw) / zDen) : 0.0;
+
+        const sqS = Math.max(0, i - sqzPeriod + 1);
+        const sqN = i - sqS + 1;
+        let sumC = 0;
+        for (let k = sqS; k <= i; k++) sumC += bars15m[k].c;
+        const smaSq = sumC / sqN;
+        let varSq = 0;
+        for (let k = sqS; k <= i; k++) varSq += (bars15m[k].c - smaSq) ** 2;
+        const bbStd = Math.sqrt(varSq / sqN);
+        const bbU = smaSq + bbMult * bbStd;
+        const bbL = smaSq - bbMult * bbStd;
+        const kcU = emaFast[i] + kcMult * atr[i];
+        const kcL = emaFast[i] - kcMult * atr[i];
+        sqzOn[i] = (sqN >= sqzPeriod && bbU < kcU && bbL > kcL) ? 1 : 0;
+
+        if (i >= kerPeriod) {
+          const netDir = Math.abs(bi.c - bars15m[i - kerPeriod].c);
+          let pathVol = 0;
+          for (let k = i - kerPeriod + 1; k <= i; k++) pathVol += Math.abs(bars15m[k].c - bars15m[k - 1].c);
+          kerRaw[i] = pathVol > 1e-12 ? (netDir / pathVol) : 0.0;
+        }
+        kerSmooth[i] = (i > 0) ? (0.5 * kerRaw[i] + 0.5 * kerSmooth[i - 1]) : kerRaw[i];
+      }
+
+      const lastIdx = n - 1;
+      const lastBar = bars15m[lastIdx];
+      let htfBias = 0;
+      if (bars1h && bars1h.length >= 10) {
+        const btMs = lastBar.t + 900000;
+        const completedH1 = bars1h.filter(hb => (hb.t + 3600000) <= btMs);
+        const m = completedH1.length;
+        if (m >= 10) {
+          let ema20 = completedH1[0].c, ema50 = completedH1[0].c;
+          const a20 = 2.0 / 21.0, a50 = 2.0 / 51.0;
+          for (let h = 0; h < m; h++) {
+            const hc = completedH1[h].c;
+            if (h > 0) {
+              ema20 = a20 * hc + (1.0 - a20) * ema20;
+              ema50 = a50 * hc + (1.0 - a50) * ema50;
+            }
+            if (h === m - 1) {
+              const ws = Math.max(0, h - 29);
+              let stpv = 0, sv = 0;
+              for (let k = ws; k <= h; k++) {
+                const hk = completedH1[k];
+                const vk = Math.max(hk.v, 1.0);
+                stpv += ((hk.h + hk.l + hk.c) / 3.0) * vk;
+                sv += vk;
+              }
+              const hvw = sv > 0 ? (stpv / sv) : hc;
+              if (hc > hvw && ema20 >= ema50) htfBias = 1;
+              else if (hc < hvw && ema20 <= ema50) htfBias = -1;
+            }
+          }
+        }
+      }
+
+      return {
+        close: Number(lastBar.c.toFixed(5)),
+        bar_time_utc: new Date(lastBar.t).toISOString().slice(0, 16) + "Z",
+        market_open: true,
+        ofi: Number(ofi[lastIdx].toFixed(3)),
+        rvol: Number(rvol[lastIdx].toFixed(2)),
+        vwap_z: Number(vwapZ[lastIdx].toFixed(2)),
+        ker: Number(kerSmooth[lastIdx].toFixed(2)),
+        atr_pct: Number(atrPct[lastIdx].toFixed(1)),
+        sqz_on: sqzOn[lastIdx],
+        htf_bias: htfBias,
+      };
+    }
+
+    function updateSpotPrice(sym, price, src) {
+      if (!Number.isFinite(price) || price <= 0) return;
+      const prev = liveState.liveSpot[sym];
+      let dir = prev ? prev.dir : 0;
+      if (prev && price > prev.price) dir = 1;
+      else if (prev && price < prev.price) dir = -1;
+      liveState.liveSpot[sym] = {
+        price: Number(price.toFixed(5)),
+        timeLocal: new Date().toLocaleTimeString(),
+        dir,
+        src,
+      };
+    }
+
+    async function refreshLiveSpot() {
+      let updated = false;
+      try {
+        const r = await fetch(
+          "https://api.binance.com/api/v3/ticker/price?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22%5D",
+          { cache: "no-store" }
+        );
+        if (r.ok) {
+          const arr = await r.json();
+          if (Array.isArray(arr)) {
+            for (const item of arr) {
+              if (item.symbol === "BTCUSDT") { updateSpotPrice("BTCUSD", Number(item.price), "Binance"); updated = true; }
+              if (item.symbol === "ETHUSDT") { updateSpotPrice("ETHUSD", Number(item.price), "Binance"); updated = true; }
+            }
+          }
+        }
+      } catch (_) {}
+
+      if (!updated) {
+        try {
+          const [b, e] = await Promise.all([
+            fetch("https://api.coinbase.com/v2/prices/BTC-USD/spot", { cache: "no-store" }).then(r => r.ok ? r.json() : null),
+            fetch("https://api.coinbase.com/v2/prices/ETH-USD/spot", { cache: "no-store" }).then(r => r.ok ? r.json() : null),
+          ]);
+          if (b?.data?.amount) { updateSpotPrice("BTCUSD", Number(b.data.amount), "Coinbase"); updated = true; }
+          if (e?.data?.amount) { updateSpotPrice("ETHUSD", Number(e.data.amount), "Coinbase"); updated = true; }
+        } catch (_) {}
+      }
+
+      if (updated) {
+        liveState.lastTickLocal = new Date().toLocaleTimeString();
+        renderHeader();
+        if (liveState.signals) renderTelemetry(liveState.signals, liveState.macro);
+      }
+    }
+
+    async function refreshLiveKlines() {
+      let anyDone = false;
+      const nowMs = Date.now();
+      await Promise.all(CRYPTO_BINANCE_PAIRS.map(async ({ sym, pair }) => {
+        try {
+          const [r15, r1h] = await Promise.all([
+            fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=15m&limit=250`, { cache: "no-store" }),
+            fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=1h&limit=120`, { cache: "no-store" }),
+          ]);
+          if (!r15.ok) return;
+          const raw15 = await r15.json();
+          const raw1h = r1h.ok ? await r1h.json() : [];
+          if (!Array.isArray(raw15) || raw15.length < 60) return;
+
+          const latestClose = Number(raw15[raw15.length - 1][4]);
+          if (!liveState.liveSpot[sym] && Number.isFinite(latestClose)) {
+            updateSpotPrice(sym, latestClose, "Binance");
+          }
+
+          const closed15 = raw15
+            .filter(k => Number(k[6]) <= nowMs)
+            .map(k => ({ t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]), v: Number(k[5]) }));
+          const closed1h = Array.isArray(raw1h)
+            ? raw1h.filter(k => Number(k[6]) <= nowMs).map(k => ({ t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]), v: Number(k[5]) }))
+            : [];
+
+          const micro = computeMicrostructure(closed15, closed1h, getVwapPeriod(sym));
+          if (micro) {
+            liveState.liveMicro[sym] = micro;
+            anyDone = true;
+          }
+        } catch (_) {}
+      }));
+      if (anyDone) {
+        if (liveState.lastTickLocal === "—") liveState.lastTickLocal = new Date().toLocaleTimeString();
+        renderHeader();
+        if (liveState.signals) renderTelemetry(liveState.signals, liveState.macro);
+      }
+    }
+
+    async function refreshLiveAux() {
+      try {
+        const [fngRes, derRes] = await Promise.all([
+          fetch("https://api.alternative.me/fng/?limit=2", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null),
+          fetch("https://www.deribit.com/api/v2/public/get_book_summary_by_instrument?instrument_name=BTC-PERPETUAL", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null),
+        ]);
+        const fngVal = fngRes?.data?.[0]?.value != null ? Number(fngRes.data[0].value) : null;
+        if (Number.isFinite(fngVal)) liveState.liveFng = fngVal;
+        const fund8 = derRes?.result?.[0]?.funding_8h;
+        if (fund8 != null && Number.isFinite(Number(fund8))) liveState.liveFunding.BTCUSD = Number(fund8);
+        if (liveState.macro) renderKPIs(liveState.macro);
+      } catch (_) {}
+    }
+
+    function renderHeader() {
+      const macro = liveState.macro;
+      const signals = liveState.signals;
+      const ml = liveState.ml;
+      let ageTxt = "—";
+      if (signals?.updated_utc) {
+        const ageMin = Math.max(0, Math.round((Date.now() - Date.parse(signals.updated_utc)) / 60000));
+        ageTxt = `${ageMin}m ago`;
+      }
+      document.getElementById("timestamps").textContent =
+        `Macro Sync: ${macro?.updated_utc || "—"} | Cloud Scan: ${signals?.updated_utc || "—"} (${ageTxt}) | Live Tick: ${liveState.lastTickLocal} | ML: ${ml?.updated_utc || "—"} | Checked: ${liveState.checkedLocal} (${liveState.refSha}) • Auto: 10s live / 2m cloud`;
+    }
+
     async function resolveDataBase() {
       if (!location.hostname.endsWith("github.io")) {
         return { base: "./data", sha: "local", bust: `?t=${Date.now()}` };
@@ -218,6 +538,9 @@
         btn.disabled = true;
         btn.textContent = "Refreshing...";
       }
+      const spotPromise = refreshLiveSpot();
+      const klinePromise = refreshLiveKlines();
+      const auxPromise = refreshLiveAux();
       try {
         const ref = await resolveDataBase();
         const opts = { cache: "no-store" };
@@ -227,15 +550,13 @@
           fetch(`${ref.base}/ml_report.json${ref.bust}`, opts).then(r => r.ok ? r.json() : null),
         ]);
 
-        let ageTxt = "—";
-        if (signals?.updated_utc) {
-          const ageMin = Math.max(0, Math.round((Date.now() - Date.parse(signals.updated_utc)) / 60000));
-          ageTxt = `${ageMin}m ago`;
-        }
-        const checkedLocal = new Date().toLocaleTimeString();
-        document.getElementById("timestamps").textContent =
-          `Macro Sync: ${macro?.updated_utc || "—"} | Signal Scan: ${signals?.updated_utc || "—"} (${ageTxt}) | ML Retrain: ${ml?.updated_utc || "—"} | Checked: ${checkedLocal} (${ref.sha}) • Auto: 2m`;
+        liveState.macro = macro;
+        liveState.signals = signals;
+        liveState.ml = ml;
+        liveState.refSha = ref.sha;
+        liveState.checkedLocal = new Date().toLocaleTimeString();
 
+        renderHeader();
         renderKPIs(macro);
         renderSignals(signals);
         renderTelemetry(signals, macro);
@@ -243,6 +564,7 @@
       } catch (e) {
         document.getElementById("timestamps").textContent = "Error loading cloud JSON artifacts: " + e.message;
       } finally {
+        await Promise.allSettled([spotPromise, klinePromise, auxPromise]);
         if (btn) {
           btn.disabled = false;
           btn.textContent = "Refresh";
@@ -255,13 +577,17 @@
       if (!macro) { el.innerHTML = ""; return; }
       const g = macro.global_regime || {};
       const gb = macro.global_bias ?? 0;
+      const fngShow = liveState.liveFng != null ? liveState.liveFng : (g.fear_greed?.value ?? "—");
+      const fundTxt = liveState.liveFunding.BTCUSD != null
+        ? ` | BTC Fund: ${(liveState.liveFunding.BTCUSD * 100).toFixed(4)}%`
+        : "";
       const cards = [
         { lbl: "Global Macro Bias", val: `${gb >= 0 ? "+" : ""}${gb}`, sub: `${gb >= 15 ? "Risk-On" : (gb <= -15 ? "Risk-Off" : "Balanced")} | DXY ${fmt(g.dxy,2)}`, c: cls(gb) },
         { lbl: "VIX / VIX3M Ratio", val: fmt(g.vix_vix3m_ratio, 3), sub: `${g.vix_state || "—"} (VIX ${fmt(g.vix,1)})`, c: (g.vix_vix3m_ratio && g.vix_vix3m_ratio < 1.0) ? "pos" : "neg" },
         { lbl: "HY Credit OAS", val: g.hy_oas_pct != null ? `${fmt(g.hy_oas_pct,2)}%` : "—", sub: `20d chg: ${g.hy_oas_chg20 >= 0 ? "+" : ""}${fmt(g.hy_oas_chg20,2)}%`, c: cls(-g.hy_oas_chg20) },
         { lbl: "Real 10Y TIPS Yield", val: g.real_10y_yield != null ? `${fmt(g.real_10y_yield,2)}%` : "—", sub: `20d chg: ${g.real_10y_chg20 >= 0 ? "+" : ""}${fmt(g.real_10y_chg20,2)}% | 10Y-2Y: ${g.yield_curve_10y2y != null ? (g.yield_curve_10y2y >= 0 ? "+" : "") + fmt(g.yield_curve_10y2y,2) + "%" : "—"}`, c: cls(-g.real_10y_chg20) },
         { lbl: "Net Fed Liquidity", val: g.fed_net_liq_trillion != null ? `$${fmt(g.fed_net_liq_trillion,3)}T` : "—", sub: `4w chg: ${g.fed_net_liq_4w_pct >= 0 ? "+" : ""}${fmt(g.fed_net_liq_4w_pct,2)}%`, c: cls(g.fed_net_liq_4w_pct) },
-        { lbl: "Crypto Liquidity & F&G", val: g.stablecoins ? `$${g.stablecoins.total_usd_b}B` : "—", sub: `Stable 30d: ${g.stablecoins ? (g.stablecoins.chg_30d_pct >= 0 ? "+" : "") + g.stablecoins.chg_30d_pct + "%" : "—"} | F&G: ${g.fear_greed?.value ?? "—"}`, c: cls(g.stablecoins?.chg_30d_pct || 0) }
+        { lbl: "Crypto Liquidity & F&G", val: g.stablecoins ? `$${g.stablecoins.total_usd_b}B` : "—", sub: `Stable 30d: ${g.stablecoins ? (g.stablecoins.chg_30d_pct >= 0 ? "+" : "") + g.stablecoins.chg_30d_pct + "%" : "—"} | F&G: ${fngShow}${fundTxt}`, c: cls(g.stablecoins?.chg_30d_pct || 0) }
       ];
       el.innerHTML = cards.map(k => `
         <div class="kpi">
@@ -301,22 +627,38 @@
     function renderTelemetry(signals, macro) {
       const tb = document.getElementById("telemetryBody");
       const notice = document.getElementById("marketNotice");
-      const rows = signals?.telemetry || [];
-      if (!rows.length) {
+      const baseRows = signals?.telemetry || [];
+      if (!baseRows.length) {
         if (notice) notice.style.display = "none";
         tb.innerHTML = `<tr><td colspan="15" class="neu">No telemetry available yet.</td></tr>`;
         return;
       }
       let closedCount = 0;
-      tb.innerHTML = rows.map(r => {
+      tb.innerHTML = baseRows.map(orig => {
+        const rt = liveState.liveMicro[orig.symbol];
+        const useRt = Boolean(rt && (!orig.bar_time_utc || rt.bar_time_utc >= orig.bar_time_utc));
+        const r = useRt ? { ...orig, ...rt } : orig;
+        const spot = liveState.liveSpot[r.symbol];
+
         const mb = r.macro_bias ?? (macro?.symbols?.[r.symbol]?.bias_score ?? 0);
         const htf = r.htf_bias > 0 ? `<span class="pos">BULL</span>` : (r.htf_bias < 0 ? `<span class="neg">BEAR</span>` : `<span class="neu">NEUT</span>`);
         const sqz = r.sqz_on ? `<span class="pill pill-warn">ON</span>` : `<span class="neu">OFF</span>`;
-        const isOpen = (typeof r.market_open === "boolean") ? r.market_open : (r.bar_time_utc ? ((Date.now() - Date.parse(r.bar_time_utc)) < 45 * 60000) : false);
+        const isRtLive = Boolean(spot || useRt);
+        const isOpen = isRtLive || ((typeof r.market_open === "boolean") ? r.market_open : (r.bar_time_utc ? ((Date.now() - Date.parse(r.bar_time_utc)) < 45 * 60000) : false));
         if (!isOpen) closedCount++;
-        const statusBadge = isOpen ? `<span class="pill pill-bull">LIVE</span>` : `<span class="pill">CLOSED</span>`;
-        const liveSub = (isOpen && r.live_price != null) ? `<div style="font-size:0.74rem;color:var(--muted)">Live: ${r.live_price}</div>` : "";
+
+        const statusBadge = isRtLive
+          ? `<span class="pill pill-bull"><span class="live-dot"></span>LIVE RT</span>`
+          : (isOpen ? `<span class="pill pill-bull">LIVE</span>` : `<span class="pill">CLOSED</span>`);
+
+        const liveVal = spot ? spot.price : r.live_price;
+        const tickCls = spot ? (spot.dir > 0 ? "tick-up" : (spot.dir < 0 ? "tick-dn" : "neu")) : "neu";
+        const tickTime = spot ? ` (${spot.timeLocal})` : "";
+        const liveSub = (isOpen && liveVal != null)
+          ? `<div class="${tickCls}" style="font-size:0.75rem">Live: ${liveVal}${tickTime}</div>`
+          : "";
         const barTxt = r.bar_time_utc ? r.bar_time_utc.slice(5) : "—";
+
         return `<tr>
           <td><strong>${r.symbol}</strong></td>
           <td class="neu">${r.asset_class}</td>
@@ -338,7 +680,7 @@
       if (notice) {
         if (closedCount >= 5) {
           notice.style.display = "block";
-          notice.textContent = `Notice: ${closedCount} of ${rows.length} symbols are currently outside market hours (weekend / session close) and display their last closed M15 session bar. 24/7 Crypto feeds (BTCUSD, ETHUSD) continue updating on every ~15-minute cloud scan.`;
+          notice.textContent = `Notice: ${closedCount} of ${baseRows.length} symbols are currently outside market hours (weekend / session close) and display their last closed Friday M15 bar. Live 24/7 Crypto (BTCUSD, ETHUSD) streams real-time spot every 10s and recalculates closed M15 microstructure every 30s directly from exchange feeds.`;
         } else {
           notice.style.display = "none";
         }
@@ -389,6 +731,8 @@
     }
 
     loadAll(false);
+    setInterval(refreshLiveSpot, 10000);
+    setInterval(refreshLiveKlines, 30000);
     setInterval(() => loadAll(false), 120000);
   </script>
 </body>
