@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -45,9 +47,16 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/
           if ! git diff --staged --quiet; then
-            git commit -m "chore(cloud): update live macro bias & closed-bar signals [skip ci]"
-            git pull --rebase origin main || true
-            git push
+            git stash push -m "cloud-data" -- data/
+            git fetch origin main
+            git checkout -B main origin/main
+            git checkout stash@{0} -- data/
+            git stash drop
+            git add data/
+            if ! git diff --staged --quiet; then
+              git commit -m "chore(cloud): update live macro bias & closed-bar signals [skip ci]"
+              git push origin main
+            fi
           else
             echo "No data changes to commit."
           fi
