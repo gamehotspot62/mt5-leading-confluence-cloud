@@ -95,9 +95,9 @@
         <div class="subtitle" id="timestamps">Loading cloud telemetry...</div>
       </div>
       <div class="feed-links">
-        <a class="btn" href="./data/MacroFlowBias.csv" target="_blank">MacroFlowBias.csv</a>
-        <a class="btn" href="./data/OptimizedConfig.csv" target="_blank">OptimizedConfig.csv</a>
-        <a class="btn" href="./data/MLModelWeights.csv" target="_blank">MLModelWeights.csv</a>
+        <a class="btn" href="https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/MacroFlowBias.csv" target="_blank">MacroFlowBias.csv</a>
+        <a class="btn" href="https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/OptimizedConfig.csv" target="_blank">OptimizedConfig.csv</a>
+        <a class="btn" href="https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/MLModelWeights.csv" target="_blank">MLModelWeights.csv</a>
         <button class="btn" onclick="loadAll()">Refresh</button>
       </div>
     </header>
@@ -182,13 +182,17 @@
     const fmt = (v, d = 2) => (v === null || v === undefined || Number.isNaN(Number(v))) ? "—" : Number(v).toFixed(d);
     const cls = (v) => Number(v) > 0 ? "pos" : (Number(v) < 0 ? "neg" : "neu");
 
+    const DATA_BASE = location.hostname.endsWith("github.io")
+      ? "https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data"
+      : "./data";
+
     async function loadAll() {
       const bust = `?t=${Date.now()}`;
       try {
         const [macro, signals, ml] = await Promise.all([
-          fetch("./data/macro_snapshot.json" + bust).then(r => r.ok ? r.json() : null),
-          fetch("./data/latest_signals.json" + bust).then(r => r.ok ? r.json() : null),
-          fetch("./data/ml_report.json" + bust).then(r => r.ok ? r.json() : null),
+          fetch(`${DATA_BASE}/macro_snapshot.json${bust}`).then(r => r.ok ? r.json() : null),
+          fetch(`${DATA_BASE}/latest_signals.json${bust}`).then(r => r.ok ? r.json() : null),
+          fetch(`${DATA_BASE}/ml_report.json${bust}`).then(r => r.ok ? r.json() : null),
         ]);
 
         document.getElementById("timestamps").textContent =
