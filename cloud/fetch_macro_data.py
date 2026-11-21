@@ -235,10 +235,10 @@ def run_macro_pipeline() -> Dict[str, Any]:
         else:
             vix_score = -40.0
 
-    # 2) FRED Macro Series (concurrent 8s bounded fetch + Yahoo Treasury/Credit proxies if FRED stalls)
+    # 2) FRED Macro Series (concurrent 12s bounded fetch + Yahoo Treasury/Credit proxies if unavailable)
     fred = fetch_fred_batch(
         ["BAMLH0A0HYM2", "DFII10", "T10Y2Y", "WALCL", "RRPONTSYD", "WTREGEN"],
-        timeout=8,
+        timeout=12,
     )
     hy_oas = fred.get("BAMLH0A0HYM2")
     dfii10 = fred.get("DFII10")

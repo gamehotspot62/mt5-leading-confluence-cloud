@@ -226,10 +226,29 @@ def fetch_yahoo_ohlcv(
         return None
 
 
-def fetch_fred_series(series_id: str, timeout: int = 8, retries: int = 0) -> Optional[pd.Series]:
-    """Fetch a FRED series via keyless fredgraph.csv endpoint (bounded timeout)."""
+def fetch_fred_series(series_id: str, timeout: int = 12, retries: int = 1) -> Optional[pd.Series]:
+    """
+    Fetch a FRED series via keyless fredgraph.csv endpoint.
+    Uses standard requests default headers (spoofed browser headers stall on FRED's WAF).
+    """
     url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={quote(series_id)}&cosd=2021-01-01"
-    resp = _http_get(url, timeout=timeout, retries=retries)
+    resp = None
+    for attempt in range(retries + 1):
+        try:
+            r = requests.get(url, timeout=timeout)
+            if r.status_code == 200:
+                resp = r
+                break
+            if r.status_code in (429, 500, 502, 503, 504) and attempt < retries:
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            break
+        except requests.RequestException:
+            if attempt < retries:
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            break
+
     if resp is None:
         return None
     try:
@@ -247,12 +266,12 @@ def fetch_fred_series(series_id: str, timeout: int = 8, retries: int = 0) -> Opt
         return None
 
 
-def fetch_fred_batch(series_ids: List[str], timeout: int = 8) -> Dict[str, Optional[pd.Series]]:
+def fetch_fred_batch(series_ids: List[str], timeout: int = 12) -> Dict[str, Optional[pd.Series]]:
     """Fetch multiple FRED series concurrently so timeouts never compound sequentially."""
     if not series_ids:
         return {}
     with ThreadPoolExecutor(max_workers=min(6, len(series_ids))) as ex:
-        results = list(ex.map(lambda sid: fetch_fred_series(sid, timeout=timeout, retries=0), series_ids))
+        results = list(ex.map(lambda sid: fetch_fred_series(sid, timeout=timeout, retries=1), series_ids))
     return dict(zip(series_ids, results))
 
 

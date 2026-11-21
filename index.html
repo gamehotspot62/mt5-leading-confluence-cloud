@@ -91,7 +91,7 @@
   <div class="container">
     <header>
       <div>
-        <h1>LeadingConfluencePro v2.00 — 24/7 Cloud Quant & ML Intelligence</h1>
+        <h1>LeadingConfluencePro v2.01 — 24/7 Cloud Quant & ML Intelligence</h1>
         <div class="subtitle" id="timestamps">Loading cloud telemetry...</div>
       </div>
       <div class="feed-links">
@@ -114,8 +114,19 @@
       <table>
         <thead>
           <tr>
-            <th>Symbol</th><th>Class</th><th>Close (M15)</th><th>Macro Bias</th><th>Macro Driver</th>
-            <th>OFI</th><th>RVOL</th><th>VWAP-Z</th><th>KER</th><th>ATR Pct</th><th>HTF</th><th>Sqz</th><th>Gate / ML</th>
+            <th>Symbol</th>
+            <th>Class</th>
+            <th>Close (M15)</th>
+            <th title="Composite Macro/On-Chain/ETF/COT bias [-100..+100]">Macro Bias</th>
+            <th title="Top macro/flow drivers active for this symbol">Macro Driver</th>
+            <th title="Order Flow Imbalance [-1..+1]: 60% BVC + 40% CLV">OFI</th>
+            <th title="Relative Volume vs 20-bar average (>=1.20x institutional activity)">RVOL</th>
+            <th title="Distance from institutional VWAP in StdDevs">VWAP-Z</th>
+            <th title="Kaufman Efficiency Ratio [0..1]: <0.22 Chop, >=0.38 Trend">KER</th>
+            <th title="100-bar ATR volatility percentile [0..100%]">ATR Pct</th>
+            <th title="Causal Higher-Timeframe (H1) bias">HTF</th>
+            <th title="Bollinger inside Keltner Volatility Squeeze">Sqz</th>
+            <th title="Active Score threshold & ML win probability gate">Gate / ML</th>
           </tr>
         </thead>
         <tbody id="telemetryBody"></tbody>
@@ -137,6 +148,28 @@
           <tbody id="cfgBody"></tbody>
         </table>
       </div>
+    </div>
+
+    <div class="section">
+      <h2>How Every Number Correlates With Buy vs. Sell Probability</h2>
+      <table>
+        <thead>
+          <tr><th>Metric</th><th>Bullish (BUY) Alignment</th><th>Bearish (SELL) Alignment</th><th>How It Filters Confirmed Signals</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Macro Bias (-100..+100)</strong></td><td class="pos">&ge; +15</td><td class="neg">&le; -15</td><td>Adds up to &plusmn;15 pts to Confluence Score &amp; feeds ML feature <code>f9</code></td></tr>
+          <tr><td><strong>VIX / VIX3M Ratio</strong></td><td class="pos">&lt; 1.00 (Contango)</td><td class="neg">&gt; 1.00 (Backwardation)</td><td>Risk-On vs Risk-Off regime driver inside Macro Bias</td></tr>
+          <tr><td><strong>HY Credit OAS</strong></td><td class="pos">Falling 20d change</td><td class="neg">Rising 20d change</td><td>Tightening credit spreads support risk assets; widening warns risk-off</td></tr>
+          <tr><td><strong>Real 10Y TIPS Yield</strong></td><td class="pos">Falling (for Gold/Tech/Crypto)</td><td class="neg">Rising (supports USD/USDJPY)</td><td>Primary macro driver for XAUUSD, XAGUSD, US100 &amp; USD pairs</td></tr>
+          <tr><td><strong>Net Fed Liquidity</strong></td><td class="pos">Positive 4w % change</td><td class="neg">Negative 4w % change</td><td>WALCL &minus; RRP &minus; TGA liquidity expansion supports risk assets</td></tr>
+          <tr><td><strong>OFI (-1.00..+1.00)</strong></td><td class="pos">&ge; +0.15 to +0.35+</td><td class="neg">&le; -0.15 to -0.35-</td><td>Hard gate for BUY/SELL triggers + top order-flow score points</td></tr>
+          <tr><td><strong>RVOL</strong></td><td colspan="2" class="neu">&ge; 1.20x–1.50x confirms institutional volume behind either direction</td><td>Squeeze requires &ge;1.20x; VSA absorption requires &ge;1.30x</td></tr>
+          <tr><td><strong>VWAP-Z</strong></td><td class="pos">Pullback &le; +1.8, Sweep &le; +1.2</td><td class="neg">Pullback &ge; -1.8, Sweep &ge; -1.2</td><td>Anti-FOMO guard blocking late chasing beyond &plusmn;2.2&sigma;</td></tr>
+          <tr><td><strong>KER (0.00..1.00)</strong></td><td colspan="2" class="neu">&lt; 0.22 favors Sweep reversals; &ge; 0.28 favors Squeeze &amp; Pullback</td><td>Matches strategy to Chop vs Balanced vs Trending market regime</td></tr>
+          <tr><td><strong>HTF (H1)</strong></td><td class="pos">BULL (+1)</td><td class="neg">BEAR (-1)</td><td>Squeeze blocks counter-HTF entries; Pullback prefers HTF alignment</td></tr>
+          <tr><td><strong>Score &amp; ML %</strong></td><td colspan="2" class="neu">Score &ge; Gate (e.g. 65+) AND ML Prob &ge; ML Gate (e.g. 35–48%+)</td><td>Highest conviction when Score &ge; 75, ML % &ge; 50%, and Macro aligns</td></tr>
+        </tbody>
+      </table>
     </div>
 
     <footer>
@@ -176,10 +209,10 @@
       const g = macro.global_regime || {};
       const gb = macro.global_bias ?? 0;
       const cards = [
-        { lbl: "Global Macro Bias", val: `${gb >= 0 ? "+" : ""}${gb}`, sub: gb >= 15 ? "Risk-On Liquidity" : (gb <= -15 ? "Risk-Off Defensive" : "Balanced Regime"), c: cls(gb) },
+        { lbl: "Global Macro Bias", val: `${gb >= 0 ? "+" : ""}${gb}`, sub: `${gb >= 15 ? "Risk-On" : (gb <= -15 ? "Risk-Off" : "Balanced")} | DXY ${fmt(g.dxy,2)}`, c: cls(gb) },
         { lbl: "VIX / VIX3M Ratio", val: fmt(g.vix_vix3m_ratio, 3), sub: `${g.vix_state || "—"} (VIX ${fmt(g.vix,1)})`, c: (g.vix_vix3m_ratio && g.vix_vix3m_ratio < 1.0) ? "pos" : "neg" },
         { lbl: "HY Credit OAS", val: g.hy_oas_pct != null ? `${fmt(g.hy_oas_pct,2)}%` : "—", sub: `20d chg: ${g.hy_oas_chg20 >= 0 ? "+" : ""}${fmt(g.hy_oas_chg20,2)}%`, c: cls(-g.hy_oas_chg20) },
-        { lbl: "Real 10Y TIPS Yield", val: g.real_10y_yield != null ? `${fmt(g.real_10y_yield,2)}%` : "—", sub: `20d chg: ${g.real_10y_chg20 >= 0 ? "+" : ""}${fmt(g.real_10y_chg20,2)}%`, c: cls(-g.real_10y_chg20) },
+        { lbl: "Real 10Y TIPS Yield", val: g.real_10y_yield != null ? `${fmt(g.real_10y_yield,2)}%` : "—", sub: `20d chg: ${g.real_10y_chg20 >= 0 ? "+" : ""}${fmt(g.real_10y_chg20,2)}% | 10Y-2Y: ${g.yield_curve_10y2y != null ? (g.yield_curve_10y2y >= 0 ? "+" : "") + fmt(g.yield_curve_10y2y,2) + "%" : "—"}`, c: cls(-g.real_10y_chg20) },
         { lbl: "Net Fed Liquidity", val: g.fed_net_liq_trillion != null ? `$${fmt(g.fed_net_liq_trillion,3)}T` : "—", sub: `4w chg: ${g.fed_net_liq_4w_pct >= 0 ? "+" : ""}${fmt(g.fed_net_liq_4w_pct,2)}%`, c: cls(g.fed_net_liq_4w_pct) },
         { lbl: "Crypto Liquidity & F&G", val: g.stablecoins ? `$${g.stablecoins.total_usd_b}B` : "—", sub: `Stable 30d: ${g.stablecoins ? (g.stablecoins.chg_30d_pct >= 0 ? "+" : "") + g.stablecoins.chg_30d_pct + "%" : "—"} | F&G: ${g.fear_greed?.value ?? "—"}`, c: cls(g.stablecoins?.chg_30d_pct || 0) }
       ];

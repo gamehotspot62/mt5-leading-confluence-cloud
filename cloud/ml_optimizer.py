@@ -61,7 +61,7 @@ def build_causal_macro_history() -> Dict[str, pd.Series]:
     shifted forward by 1 day (and CFTC by 4 days for Friday release lag) so
     no historical bar ever leaks future macro data.
     """
-    fred = fetch_fred_batch(["BAMLH0A0HYM2", "DFII10"], timeout=8)
+    fred = fetch_fred_batch(["BAMLH0A0HYM2", "DFII10"], timeout=12)
     hy = fred.get("BAMLH0A0HYM2")
     dfii10 = fred.get("DFII10")
     vix_df = fetch_yahoo_ohlcv("^VIX", interval="1d", range_period="5y")
