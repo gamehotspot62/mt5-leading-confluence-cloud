@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-21T17:08:19Z",
+  "updated_utc": "2026-11-21T18:12:44Z",
   "global_bias": -14,
   "global_regime": {
     "vix": 35.89,
@@ -19,8 +19,8 @@
     "credit_hyg_tlt_20d_pct": -1.07,
     "tech_qqq_xlp_20d_pct": -15.72,
     "stablecoins": {
-      "total_usd_b": 282.51,
-      "chg_7d_pct": -1.58,
+      "total_usd_b": 282.53,
+      "chg_7d_pct": -1.57,
       "chg_30d_pct": -6.31
     },
     "fear_greed": {
@@ -92,8 +92,8 @@
         "netflow_pts": 11.7,
         "ex_supply_30d_pct": 1.3,
         "stablecoins_30d_pct": -6.31,
-        "funding_8h": -0.0,
-        "funding_pts": 0.0,
+        "funding_8h": 0.0,
+        "funding_pts": -0.0,
         "fear_greed": 12.0
       }
     },
