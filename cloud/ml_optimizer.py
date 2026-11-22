@@ -278,7 +278,7 @@ def label_candidates(
             mtm = ((c[exit_idx] - entry) * direction) / risk
             r_net = max(-1.0, min(tp1_mult, mtm)) - cost_r
 
-        y = 1 if hit_tp1 else 0
+        y = 1 if r_net > 0.0 else 0
         row = {
             "bar_idx": s,
             "exit_idx": exit_idx,
@@ -287,6 +287,7 @@ def label_candidates(
             "playbook": cand["playbook"],
             "score": cand["score"],
             "y": y,
+            "hit_tp1": 1 if hit_tp1 else 0,
             "r_net": float(r_net),
         }
         for fi, fn in enumerate(FEATURE_NAMES):
@@ -445,7 +446,9 @@ def optimize_symbol_timeframe(
     tf_label = "M15" if base_tf == "15m" else ("H1" if base_tf == "1h" else "D1")
     if not ml_ev.empty:
         ml_ev["symbol"] = sym
+        ml_ev["asset_class"] = WATCHLIST[sym]["asset_class"]
         ml_ev["timeframe"] = tf_label
+        ml_ev["series_id"] = f"{sym}_{tf_label}"
 
     if best_eval is not None and best_eval["trades"] >= 12 and best_eval["exp_r"] > 0.0:
         row = {
@@ -490,50 +493,84 @@ def optimize_symbol_timeframe(
 
 def _train_purged_cv_models(events_df: pd.DataFrame) -> Dict[str, Any]:
     """
-    Evaluate Calibrated Logistic Regression vs HistGradientBoosting on purged OOS folds,
-    select optimal ML probability threshold, and fit final weights on full sample.
+    Evaluate Calibrated Logistic Regression (tuned L2 regularization) vs HistGradientBoosting
+    on per-series stratified purged OOS folds (preventing timeframe shift & overlap leakage),
+    select optimal ML probability threshold, and fit final return-weighted weights.
     """
     df_ev = events_df.sort_values("time").reset_index(drop=True)
     X = df_ev[FEATURE_NAMES].values.astype(float)
     y = df_ev["y"].values.astype(int)
     r_net = df_ev["r_net"].values.astype(float)
+    sample_w = 0.5 + np.clip(np.abs(r_net), 0.0, 2.5)
 
-    # Create chronological integer index for pooled purged CV
-    if "symbol" in df_ev.columns and df_ev["symbol"].nunique() > 1:
-        # Sort chronologically by timestamp and use timestamp-based purging across symbols
-        t_sec = df_ev["time"].astype("int64").values // 10**9
-        df_ev = df_ev.copy()
-        df_ev["_t_bar"] = np.arange(len(df_ev))
-        # Estimate exit bar in chronological pooled order
-        splits = purged_walk_forward_splits(
-            pd.DataFrame({"bar_idx": np.arange(len(df_ev)), "exit_idx": np.arange(len(df_ev)) + 15}),
-            n_splits=5,
-            embargo_bars=5,
-            min_train_events=max(30, int(0.35 * len(df_ev))),
-        )
+    n_splits = 5
+    splits: List[Tuple[np.ndarray, np.ndarray]] = []
+    if "series_id" in df_ev.columns and df_ev["series_id"].nunique() > 1:
+        fold_tr: List[List[int]] = [[] for _ in range(n_splits)]
+        fold_te: List[List[int]] = [[] for _ in range(n_splits)]
+        for _, grp in df_ev.groupby("series_id"):
+            g = grp.sort_values("bar_idx")
+            orig_idx = g.index.values
+            sp = purged_walk_forward_splits(
+                g.reset_index(drop=True),
+                n_splits=n_splits,
+                embargo_bars=3,
+                min_train_events=max(12, int(0.30 * len(g))),
+            )
+            for fi, (tr_l, te_l) in enumerate(sp):
+                if fi < n_splits:
+                    fold_tr[fi].extend(orig_idx[tr_l].tolist())
+                    fold_te[fi].extend(orig_idx[te_l].tolist())
+        for fi in range(n_splits):
+            if len(fold_tr[fi]) >= 20 and len(fold_te[fi]) >= 5:
+                splits.append((np.array(fold_tr[fi], dtype=int), np.array(fold_te[fi], dtype=int)))
     else:
-        splits = purged_walk_forward_splits(df_ev, n_splits=5, embargo_bars=3, min_train_events=25)
+        splits = purged_walk_forward_splits(df_ev, n_splits=n_splits, embargo_bars=3, min_train_events=25)
 
     if not splits or len(np.unique(y)) < 2:
         return {"ok": False}
 
+    c_grid = (0.03, 0.08, 0.20, 0.50) if len(df_ev) >= 500 else (0.03, 0.08, 0.15)
+    best_c = 0.08
+    best_brier = 999.0
+    best_auc_sel = -1.0
     oof_lr_probs = np.full(len(df_ev), np.nan)
     oof_gb_probs = np.full(len(df_ev), np.nan)
     oof_y = np.full(len(df_ev), np.nan)
     oof_r = np.full(len(df_ev), np.nan)
 
+    for c_val in c_grid:
+        cur_lr = np.full(len(df_ev), np.nan)
+        cur_y = np.full(len(df_ev), np.nan)
+        cur_r = np.full(len(df_ev), np.nan)
+        for tr_idx, te_idx in splits:
+            if len(np.unique(y[tr_idx])) < 2:
+                continue
+            scaler = StandardScaler()
+            X_tr_s = scaler.fit_transform(X[tr_idx])
+            X_te_s = scaler.transform(X[te_idx])
+            lr = LogisticRegression(C=c_val, max_iter=1000, random_state=42)
+            lr.fit(X_tr_s, y[tr_idx], sample_weight=sample_w[tr_idx])
+            cur_lr[te_idx] = lr.predict_proba(X_te_s)[:, 1]
+            cur_y[te_idx] = y[te_idx]
+            cur_r[te_idx] = r_net[te_idx]
+
+        v_c = np.isfinite(cur_lr) & np.isfinite(cur_y)
+        if int(np.sum(v_c)) < 20 or len(np.unique(cur_y[v_c])) < 2:
+            continue
+        br_c = float(brier_score_loss(cur_y[v_c].astype(int), cur_lr[v_c]))
+        auc_c = float(roc_auc_score(cur_y[v_c].astype(int), cur_lr[v_c]))
+        if (br_c < best_brier - 1e-4) or (abs(br_c - best_brier) <= 1e-4 and auc_c > best_auc_sel):
+            best_brier = br_c
+            best_auc_sel = auc_c
+            best_c = c_val
+            oof_lr_probs = cur_lr
+            oof_y = cur_y
+            oof_r = cur_r
+
     for tr_idx, te_idx in splits:
         if len(np.unique(y[tr_idx])) < 2:
             continue
-
-        scaler = StandardScaler()
-        X_tr_s = scaler.fit_transform(X[tr_idx])
-        X_te_s = scaler.transform(X[te_idx])
-
-        lr = LogisticRegression(C=0.5, max_iter=1000, random_state=42)
-        lr.fit(X_tr_s, y[tr_idx])
-        oof_lr_probs[te_idx] = lr.predict_proba(X_te_s)[:, 1]
-
         gb_base = HistGradientBoostingClassifier(
             max_depth=3,
             max_iter=120,
@@ -549,9 +586,6 @@ def _train_purged_cv_models(events_df: pd.DataFrame) -> Dict[str, Any]:
         except Exception:
             gb_base.fit(X[tr_idx], y[tr_idx])
             oof_gb_probs[te_idx] = gb_base.predict_proba(X[te_idx])[:, 1]
-
-        oof_y[te_idx] = y[te_idx]
-        oof_r[te_idx] = r_net[te_idx]
 
     valid = np.isfinite(oof_lr_probs) & np.isfinite(oof_y)
     if int(np.sum(valid)) < 20 or len(np.unique(oof_y[valid])) < 2:
@@ -570,18 +604,22 @@ def _train_purged_cv_models(events_df: pd.DataFrame) -> Dict[str, Any]:
     base_exp = float(np.mean(r_v))
     base_win = float(100.0 * np.mean(y_v))
 
-    # Threshold search on purged OOS predictions (keep >= 35% of signals)
-    best_thresh = 0.35
+    # Fine quantile + grid threshold search on purged OOS predictions (keep >= 30% of signals)
+    q_grid = [round(float(np.quantile(p_lr, q)), 2) for q in np.linspace(0.15, 0.70, 12)]
+    f_grid = [round(float(x), 2) for x in np.arange(0.32, 0.65, 0.02)]
+    cand_thresh = sorted(set(x for x in (q_grid + f_grid) if 0.25 <= x <= 0.65))
+
+    best_thresh = round(float(np.clip(np.quantile(p_lr, 0.25), 0.32, 0.55)), 2)
     best_exp = base_exp
     best_win = base_win
     best_kept = 1.0
-    for th in [0.35, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62]:
+    for th in cand_thresh:
         mask = p_lr >= th
         kept_frac = float(np.mean(mask))
-        if kept_frac < 0.35 or int(np.sum(mask)) < 10:
+        if kept_frac < 0.30 or int(np.sum(mask)) < 12:
             continue
         th_exp = float(np.mean(r_v[mask]))
-        if th_exp >= best_exp:
+        if th_exp > best_exp:
             best_exp = th_exp
             best_win = float(100.0 * np.mean(y_v[mask]))
             best_thresh = round(float(th), 2)
@@ -590,13 +628,15 @@ def _train_purged_cv_models(events_df: pd.DataFrame) -> Dict[str, Any]:
     # Fit final production StandardScaler + LogisticRegression on full dataset
     final_scaler = StandardScaler()
     X_full_s = final_scaler.fit_transform(X)
-    final_lr = LogisticRegression(C=0.5, max_iter=1000, random_state=42)
-    final_lr.fit(X_full_s, y)
+    final_lr = LogisticRegression(C=best_c, max_iter=1000, random_state=42)
+    final_lr.fit(X_full_s, y, sample_weight=sample_w)
+    p_full = final_lr.predict_proba(X_full_s)[:, 1]
 
     return {
         "ok": True,
         "samples": int(len(df_ev)),
         "oos_samples": int(len(y_v)),
+        "best_c": best_c,
         "auc_lr": round(auc_lr, 4),
         "auc_gb": round(auc_gb, 4),
         "brier_lr": round(brier_lr, 4),
@@ -607,6 +647,9 @@ def _train_purged_cv_models(events_df: pd.DataFrame) -> Dict[str, Any]:
         "ml_oos_exp_r": round(best_exp, 3),
         "ml_min_prob": best_thresh,
         "kept_fraction": best_kept,
+        "p_min": round(float(np.min(p_full)), 3),
+        "p_max": round(float(np.max(p_full)), 3),
+        "p_std": round(float(np.std(p_full)), 3),
         "intercept": float(final_lr.intercept_[0]),
         "means": [float(v) for v in final_scaler.mean_],
         "stds": [float(s if s > 1e-9 else 1.0) for s in final_scaler.scale_],
@@ -695,27 +738,83 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
                 f"ML_Exp={global_model['ml_oos_exp_r']:+.3f}R (P>={global_model['ml_min_prob']:.2f})"
             )
 
-    # Train Specialized Per-Symbol Models where sample size >= 60 and OOS AUC > 0.53
+    # Train Asset-Class Meta-Models (CRYPTO, METALS, ENERGY, FX, INDEX)
+    ac_models: Dict[str, Dict[str, Any]] = {}
+    if all_ml_events:
+        pooled_all = pd.concat(all_ml_events, ignore_index=True)
+        for ac, ac_df in pooled_all.groupby("asset_class"):
+            ac_res = _train_purged_cv_models(ac_df)
+            ac_valid = bool(
+                ac_res.get("ok")
+                and ac_res["ml_oos_exp_r"] > ac_res["base_oos_exp_r"]
+                and ac_res["auc_lr"] >= 0.50
+            )
+            ac_res["validated"] = ac_valid
+            ac_models[str(ac)] = ac_res
+            if ac_valid:
+                print(
+                    f"ASSET_CLASS[{ac.upper()}]: samples={ac_res['samples']}, "
+                    f"AUC={ac_res['auc_lr']}, Base={ac_res['base_oos_exp_r']:+.3f}R -> "
+                    f"ML={ac_res['ml_oos_exp_r']:+.3f}R (P>={ac_res['ml_min_prob']:.2f})"
+                )
+
+    def _pack_model(m: Dict[str, Any], src: str) -> Dict[str, Any]:
+        return {
+            "source": src,
+            "intercept": round(float(m["intercept"]), 6),
+            "ml_min_prob": round(float(m["ml_min_prob"]), 2),
+            "means": [round(float(x), 6) for x in m["means"]],
+            "stds": [round(float(x), 6) for x in m["stds"]],
+            "weights": [round(float(x), 6) for x in m["weights"]],
+        }
+
+    # Export explicit row per symbol in MLModelWeights.csv & full weights map in ml_report.json
     ml_rows: List[str] = [_format_ml_csv_row("GLOBAL", global_model)]
     sym_ml_summary: Dict[str, Any] = {}
+    exported_models: Dict[str, Any] = {"GLOBAL": _pack_model(global_model, "GLOBAL")}
 
     for sym in WATCHLIST.keys():
+        ac = WATCHLIST[sym]["asset_class"]
         evs = per_sym_events.get(sym, [])
         merged_sym = pd.concat(evs, ignore_index=True) if evs else pd.DataFrame()
+
+        chosen_model = global_model
         sym_min_prob = float(global_model["ml_min_prob"])
         used_model = "GLOBAL"
 
+        ac_candidate = ac_models.get(ac)
+        if ac_candidate and ac_candidate.get("validated"):
+            chosen_model = ac_candidate
+            sym_min_prob = float(ac_candidate["ml_min_prob"])
+            used_model = f"ASSET_CLASS({ac.upper()}, P>={sym_min_prob:.2f})"
+
+        sym_res: Dict[str, Any] = {}
         if len(merged_sym) >= 60:
             sym_res = _train_purged_cv_models(merged_sym)
-            if sym_res.get("ok") and sym_res["auc_lr"] > 0.53:
-                ml_rows.append(_format_ml_csv_row(sym, sym_res))
+            # Strict OOS acceptance: must beat AUC >= 0.53 AND genuinely improve OOS expectancy
+            if (
+                sym_res.get("ok")
+                and sym_res["auc_lr"] >= 0.53
+                and sym_res["ml_oos_exp_r"] > sym_res["base_oos_exp_r"]
+            ):
+                chosen_model = sym_res
                 sym_min_prob = float(sym_res["ml_min_prob"])
-                used_model = f"SPECIALIZED(AUC={sym_res['auc_lr']})"
+                used_model = f"SPECIALIZED(AUC={sym_res['auc_lr']}, P>={sym_min_prob:.2f})"
                 sym_ml_summary[sym] = {k: v for k, v in sym_res.items() if k not in ("means", "stds", "weights")}
             else:
-                sym_ml_summary[sym] = {"inherited": "GLOBAL", "samples": len(merged_sym), "ok": sym_res.get("ok", False)}
+                sym_ml_summary[sym] = {
+                    "inherited": used_model,
+                    "samples": len(merged_sym),
+                    "sym_auc_lr": sym_res.get("auc_lr"),
+                    "sym_base_exp_r": sym_res.get("base_oos_exp_r"),
+                    "sym_ml_exp_r": sym_res.get("ml_oos_exp_r"),
+                    "ok": sym_res.get("ok", False),
+                }
         else:
-            sym_ml_summary[sym] = {"inherited": "GLOBAL", "samples": len(merged_sym)}
+            sym_ml_summary[sym] = {"inherited": used_model, "samples": len(merged_sym)}
+
+        ml_rows.append(_format_ml_csv_row(sym, chosen_model))
+        exported_models[sym] = _pack_model(chosen_model, used_model)
 
         # Propagate ML_MIN_PROB into OptimizedConfig rows for this symbol
         for r in opt_rows:
@@ -783,6 +882,11 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
         "feature_names": FEATURE_NAMES,
         "global_model": {k: v for k, v in global_model.items() if k not in ("means", "stds", "weights")},
         "global_feature_weights": feat_weights,
+        "asset_class_models": {
+            k: {mk: mv for mk, mv in v.items() if mk not in ("means", "stds", "weights")}
+            for k, v in ac_models.items()
+        },
+        "ml_models": exported_models,
         "symbol_models": sym_ml_summary,
         "optimized_configs": opt_rows,
     }

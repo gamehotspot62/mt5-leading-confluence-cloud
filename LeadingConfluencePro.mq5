@@ -7,7 +7,7 @@
 //+------------------------------------------------------------------+
 #property copyright "LeadingConfluencePro Quantitative Architecture"
 #property link      "https://github.com/gamehotspot62/mt5-leading-confluence-cloud"
-#property version   "2.01"
+#property version   "2.02"
 #property description "Universal non-repainting leading confluence indicator v2.01:"
 #property description "1) BVC + CLV Order Flow Delta & CVD Divergence (microstructure)"
 #property description "2) Wyckoff Liquidity Sweep / SFP Reversal (behavioral stop hunts)"
@@ -608,6 +608,8 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
    bool   prevPl       = g_effEnPullback;
    double prevMLProb   = g_effMLMinProb;
    bool   prevMLLoaded = g_mlLoaded;
+   double prevMLInt    = g_mlIntercept;
+   double prevMLW0     = g_mlWeight[0];
 
    // Defaults from user inputs
    g_effMinScore   = GetManualMinScoreThreshold();
@@ -788,7 +790,9 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
          prevSq       != g_effEnSqueeze ||
          prevPl       != g_effEnPullback ||
          prevMLLoaded != g_mlLoaded ||
-         MathAbs(prevMLProb - g_effMLMinProb) > 1e-6)
+         MathAbs(prevMLProb - g_effMLMinProb) > 1e-6 ||
+         MathAbs(prevMLInt - g_mlIntercept) > 1e-6 ||
+         MathAbs(prevMLW0 - g_mlWeight[0]) > 1e-6)
       {
          g_cloudConfigDirty = true;
       }
@@ -1256,7 +1260,24 @@ void UpdateVisualsAndStats(const int rates_total,
    // Row 3: Cloud ML + ATR Percentile + FVG/Displacement Status
    bool cloudSvcOk = (GlobalVariableCheck("LCP_CLOUD_STATUS") && GlobalVariableGet("LCP_CLOUD_STATUS") > 0.5);
    string svcTxt   = cloudSvcOk ? "SYNCED" : ((g_cloudConfigLoaded || g_mlLoaded) ? "LOCAL_CSV" : "DEFAULT");
-   string mlTxt    = g_mlLoaded ? StringFormat("ON(%s >=%.0f%%)", g_mlModelSym, g_effMLMinProb * 100.0) : "OFF";
+   string mlTxt    = "OFF";
+   if(g_mlLoaded && lastClosed >= g_calcStart + 2)
+   {
+      double rngLC = high[lastClosed] - low[lastClosed];
+      double clvLC = (rngLC > _Point * 0.1) ? (((close[lastClosed] - low[lastClosed]) - (high[lastClosed] - close[lastClosed])) / rngLC) : 0.0;
+      double sd3LC = g_delta[lastClosed] + g_delta[lastClosed - 1] + g_delta[lastClosed - 2];
+      double sv3LC = MathMax(1.0, g_effVol[lastClosed] + g_effVol[lastClosed - 1] + g_effVol[lastClosed - 2]);
+      double nd3LC = sd3LC / sv3LC;
+      double bFvgLC = (g_fvgDispState[lastClosed] > 0) ? 1.0 : 0.0;
+      double sFvgLC = (g_fvgDispState[lastClosed] < 0) ? 1.0 : 0.0;
+      double pBuyLC  = EvaluateMLWinProb(1, g_ofi[lastClosed], nd3LC, g_rvol[lastClosed], g_vwapZ[lastClosed], RegimeBuffer[lastClosed], g_htfBias[lastClosed], clvLC, g_atrPct[lastClosed], bFvgLC, g_cachedMacroBias);
+      double pSellLC = EvaluateMLWinProb(-1, g_ofi[lastClosed], nd3LC, g_rvol[lastClosed], g_vwapZ[lastClosed], RegimeBuffer[lastClosed], g_htfBias[lastClosed], clvLC, g_atrPct[lastClosed], sFvgLC, g_cachedMacroBias);
+      mlTxt = StringFormat("ON(%s >=%.0f%% | B:%.0f%% S:%.0f%%)", g_mlModelSym, g_effMLMinProb * 100.0, pBuyLC * 100.0, pSellLC * 100.0);
+   }
+   else if(g_mlLoaded)
+   {
+      mlTxt = StringFormat("ON(%s >=%.0f%%)", g_mlModelSym, g_effMLMinProb * 100.0);
+   }
    string fvgTxt   = (g_fvgDispState[lastClosed] > 0) ? "BULL" : ((g_fvgDispState[lastClosed] < 0) ? "BEAR" : "NONE");
    color cloudClr  = (g_mlLoaded || cloudSvcOk) ? clrAqua : clrSilver;
    string rowCloud = StringFormat("Cloud: %s (Opt:%s) | ML: %s | ATR-Pct: %.0f%% | FVG/Disp: %s",

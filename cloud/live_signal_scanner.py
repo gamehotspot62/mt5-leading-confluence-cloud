@@ -132,6 +132,91 @@ def _trim_to_closed_bars(df: pd.DataFrame, bar_minutes: int, now_utc: pd.Timesta
     return closed.reset_index(drop=True)
 
 
+def _signal_grade(
+    score: int,
+    ml_prob: Optional[float],
+    ml_thresh: float,
+    direction: str,
+    macro_bias: int,
+) -> str:
+    macro_aligned = (direction == "BUY" and macro_bias >= 15) or (direction == "SELL" and macro_bias <= -15)
+    if score >= 80 and (ml_prob is None or ml_prob >= ml_thresh + 0.05) and macro_aligned:
+        return "A+"
+    if score >= 72 and (ml_prob is None or ml_prob >= ml_thresh + 0.02):
+        return "A"
+    return "B"
+
+
+def _compute_live_bar_features_and_probs(
+    tf_df: pd.DataFrame,
+    st: Dict[str, Any],
+    idx: int,
+    macro_val: int,
+    ml_model: Optional[Dict[str, Any]],
+    latest_sig_dir: int = 0,
+) -> Tuple[Optional[float], Optional[float], str]:
+    h = tf_df["high"].values.astype(float)
+    l = tf_df["low"].values.astype(float)
+    c = tf_df["close"].values.astype(float)
+    o = tf_df["open"].values.astype(float)
+    v = np.maximum(tf_df["volume"].values.astype(float), 1.0)
+
+    rng = h[idx] - l[idx]
+    clv_i = (((c[idx] - l[idx]) - (h[idx] - c[idx])) / rng) if rng > 1e-12 else 0.0
+    ofi_arr = st["ofi"]
+    s_i = max(0, idx - 2)
+    sum_vol3 = float(np.sum(v[s_i : idx + 1]))
+    net_delta3 = float(np.sum(v[s_i : idx + 1] * ofi_arr[s_i : idx + 1]) / max(sum_vol3, 1.0))
+
+    body = c[idx] - o[idx]
+    at = float(st["atr"][idx])
+    rvol_i = float(st["rvol"][idx])
+    z_i = float(st["vwap_z"][idx])
+    ker_i = float(st["ker"][idx])
+    htf_i = int(st["htf_bias"][idx])
+    atr_pct_i = float(st["atr_pct"][idx])
+    sqz_i = int(st["sqz_on"][idx])
+
+    bull_fvg_disp = 1.0 if ((idx >= 2 and l[idx] > h[idx - 2]) or (body >= 0.65 * at and rvol_i >= 1.25 and clv_i >= 0.50)) else 0.0
+    bear_fvg_disp = 1.0 if ((idx >= 2 and h[idx] < l[idx - 2]) or ((-body) >= 0.65 * at and rvol_i >= 1.25 and clv_i <= -0.50)) else 0.0
+
+    def _feats(d: int) -> List[float]:
+        return [
+            float(d * float(ofi_arr[idx])),
+            float(d * net_delta3),
+            float(min(rvol_i, 5.0)),
+            float(d * z_i),
+            float(ker_i),
+            float(d * htf_i),
+            float(d * clv_i),
+            float(atr_pct_i / 100.0),
+            float(bull_fvg_disp if d == 1 else bear_fvg_disp),
+            float((d * float(macro_val)) / 100.0),
+        ]
+
+    p_buy = _eval_ml_prob(ml_model, _feats(1))
+    p_sell = _eval_ml_prob(ml_model, _feats(-1))
+
+    if latest_sig_dir == 1:
+        status = "CONFIRMED BUY"
+    elif latest_sig_dir == -1:
+        status = "CONFIRMED SELL"
+    elif sqz_i == 1:
+        status = "SQZ COILING"
+    elif abs(z_i) >= 1.1 and abs(float(ofi_arr[idx])) >= 0.15:
+        status = "NEAR SWEEP"
+    elif htf_i != 0 and ker_i >= 0.25:
+        status = "TREND WATCH"
+    else:
+        status = "WAIT"
+
+    return (
+        round(p_buy, 3) if p_buy is not None else None,
+        round(p_sell, 3) if p_sell is not None else None,
+        status,
+    )
+
+
 def _send_notifications(new_alerts: List[Dict[str, Any]]) -> None:
     if not new_alerts:
         return
@@ -140,13 +225,14 @@ def _send_notifications(new_alerts: List[Dict[str, Any]]) -> None:
     tg_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     discord_url = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 
-    lines = ["*LeadingConfluencePro Cloud — Confirmed Signals*"]
+    lines = ["*LeadingConfluencePro Cloud — Confirmed Live Signals*"]
     for a in new_alerts:
         prob_txt = f" | ML {a['ml_prob']*100:.0f}%" if a.get("ml_prob") is not None else ""
+        grade_txt = f" [{a.get('grade', 'B')}]"
         lines.append(
-            f"• *{a['symbol']} {a['timeframe']}* `{a['direction']}` ({a['playbook']}) "
+            f"• *{a['symbol']} {a['timeframe']}* `{a['direction']}` ({a['playbook']}){grade_txt} "
             f"| Score `{a['score']}/100`{prob_txt} | Macro `{a['macro_bias']:+d}`\n"
-            f"  Entry: `{a['entry']:.5g}` | SL: `{a['sl']:.5g}` | TP1: `{a['tp1']:.5g}` | TP2: `{a['tp2']:.5g}`"
+            f"  Entry: `{a['entry']:.5g}` | SL: `{a['sl']:.5g}` ({a.get('sl_dist_pct', 0):.2f}%) | TP1: `{a['tp1']:.5g}` | TP2: `{a['tp2']:.5g}`"
         )
     text_msg = "\n".join(lines)
 
@@ -193,6 +279,7 @@ def run_live_scan() -> Dict[str, Any]:
 
     watchlist_telemetry: List[Dict[str, Any]] = []
     confirmed_signals: List[Dict[str, Any]] = []
+    closed_market_signals: List[Dict[str, Any]] = []
     new_alerts: List[Dict[str, Any]] = []
 
     for sym, meta in WATCHLIST.items():
@@ -201,6 +288,8 @@ def run_live_scan() -> Dict[str, Any]:
             continue
 
         raw_last_time = pd.Timestamp(df_15m_raw["time"].iloc[-1])
+        if raw_last_time.tzinfo is None:
+            raw_last_time = raw_last_time.tz_localize("UTC")
         live_price = round(float(df_15m_raw["close"].iloc[-1]), 5)
         live_time_utc = raw_last_time.strftime("%Y-%m-%dT%H:%M:%SZ")
         market_open = bool((now_dt - raw_last_time).total_seconds() <= 35 * 60)
@@ -247,7 +336,69 @@ def run_live_scan() -> Dict[str, Any]:
 
             last_closed_idx = len(tf_df) - 1
             st = res["state"]
+            latest_sig_dir = 0
+
+            # Evaluate signals first so M15 telemetry reflects confirmed signal status
+            max_dash_bars = 5 if tf_name == "M15" else 2
+            max_dash_age = (3 * 3600) if tf_name == "M15" else (6 * 3600)
+            max_alert_bars = 3 if tf_name == "M15" else 1
+            max_alert_age = (90 * 60) if tf_name == "M15" else (180 * 60)
+
+            for cand in res["candidates"]:
+                prob = _eval_ml_prob(ml_model, cand["features"])
+                ml_passed = True if (prob is None or prob >= ml_thresh) else False
+                if not ml_passed:
+                    continue
+
+                if cand["bar_idx"] == last_closed_idx:
+                    latest_sig_dir = int(cand["dir"])
+
+                cand_ts = pd.Timestamp(cand["time"])
+                if cand_ts.tzinfo is None:
+                    cand_ts = cand_ts.tz_localize("UTC")
+                bar_age_sec = (now_dt - cand_ts).total_seconds()
+                dir_str = "BUY" if cand["dir"] == 1 else "SELL"
+                entry_val = float(cand["entry"])
+                sl_val = float(cand["sl"])
+                sl_dist_pct = round(abs(entry_val - sl_val) / max(abs(entry_val), 1e-9) * 100.0, 2)
+                grade = _signal_grade(int(cand["score"]), prob, ml_thresh, dir_str, int(macro_val))
+
+                sig_obj = {
+                    "symbol": sym,
+                    "timeframe": tf_name,
+                    "bar_time_utc": cand["time"].strftime("%Y-%m-%dT%H:%MZ"),
+                    "is_fresh_closed_bar": bool(cand["bar_idx"] == last_closed_idx),
+                    "market_open": market_open,
+                    "direction": dir_str,
+                    "playbook": cand["playbook"],
+                    "grade": grade,
+                    "score": int(cand["score"]),
+                    "ml_prob": round(prob, 3) if prob is not None else None,
+                    "macro_bias": int(macro_val),
+                    "entry": round(entry_val, 6),
+                    "sl": round(sl_val, 6),
+                    "sl_dist_pct": sl_dist_pct,
+                    "tp1": round(float(cand["tp1"]), 6),
+                    "tp2": round(float(cand["tp2"]), 6),
+                }
+
+                if market_open:
+                    if cand["bar_idx"] >= last_closed_idx - max_dash_bars and bar_age_sec <= max_dash_age:
+                        confirmed_signals.append(sig_obj)
+                    if cand["bar_idx"] >= last_closed_idx - max_alert_bars and bar_age_sec <= max_alert_age:
+                        alert_key = f"{sym}|{tf_name}|{sig_obj['bar_time_utc']}|{dir_str}"
+                        if alert_key not in sent_set:
+                            sent_set.add(alert_key)
+                            sent_keys.append(alert_key)
+                            new_alerts.append(sig_obj)
+                else:
+                    if cand["bar_idx"] >= last_closed_idx - 2:
+                        closed_market_signals.append(sig_obj)
+
             if tf_name == "M15":
+                p_buy, p_sell, setup_status = _compute_live_bar_features_and_probs(
+                    tf_df, st, last_closed_idx, int(macro_val), ml_model, latest_sig_dir=latest_sig_dir
+                )
                 watchlist_telemetry.append(
                     {
                         "symbol": sym,
@@ -269,40 +420,11 @@ def run_live_scan() -> Dict[str, Any]:
                         "htf_bias": int(st["htf_bias"][last_closed_idx]),
                         "min_score": params.min_score,
                         "ml_min_prob": round(ml_thresh, 2),
+                        "ml_buy_prob": p_buy,
+                        "ml_sell_prob": p_sell,
+                        "setup_status": setup_status,
                     }
                 )
-
-            # Check signals on the latest closed bar or within last 3 closed bars for dashboard visibility
-            for cand in res["candidates"]:
-                prob = _eval_ml_prob(ml_model, cand["features"])
-                ml_passed = True if (prob is None or prob >= ml_thresh) else False
-                if not ml_passed:
-                    continue
-
-                if cand["bar_idx"] >= last_closed_idx - 2:
-                    sig_obj = {
-                        "symbol": sym,
-                        "timeframe": tf_name,
-                        "bar_time_utc": cand["time"].strftime("%Y-%m-%dT%H:%MZ"),
-                        "is_fresh_closed_bar": bool(cand["bar_idx"] == last_closed_idx),
-                        "direction": "BUY" if cand["dir"] == 1 else "SELL",
-                        "playbook": cand["playbook"],
-                        "score": int(cand["score"]),
-                        "ml_prob": round(prob, 3) if prob is not None else None,
-                        "macro_bias": int(macro_val),
-                        "entry": round(float(cand["entry"]), 6),
-                        "sl": round(float(cand["sl"]), 6),
-                        "tp1": round(float(cand["tp1"]), 6),
-                        "tp2": round(float(cand["tp2"]), 6),
-                    }
-                    confirmed_signals.append(sig_obj)
-
-                    if cand["bar_idx"] == last_closed_idx:
-                        alert_key = f"{sym}|{tf_name}|{sig_obj['bar_time_utc']}|{sig_obj['direction']}"
-                        if alert_key not in sent_set:
-                            sent_set.add(alert_key)
-                            sent_keys.append(alert_key)
-                            new_alerts.append(sig_obj)
 
     _send_notifications(new_alerts)
     sent_keys = sent_keys[-500:]
@@ -313,6 +435,7 @@ def run_live_scan() -> Dict[str, Any]:
         "watchlist_count": len(watchlist_telemetry),
         "fresh_alerts_dispatched": len(new_alerts),
         "recent_confirmed_signals": confirmed_signals,
+        "closed_market_last_signals": closed_market_signals,
         "telemetry": watchlist_telemetry,
     }
     (DATA_DIR / "latest_signals.json").write_text(json.dumps(output, indent=2), encoding="utf-8")
