@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-22T22:16:57Z",
+  "updated_utc": "2026-11-22T23:02:12Z",
   "global_bias": -14,
   "global_regime": {
     "vix": 35.89,
@@ -122,8 +122,8 @@
         "netflow_pts": -1.0,
         "ex_supply_30d_pct": -3.4,
         "stablecoins_30d_pct": -6.17,
-        "funding_8h": 0.0,
-        "funding_pts": -0.0,
+        "funding_8h": -1e-06,
+        "funding_pts": 0.0,
         "fear_greed": 11.0
       }
     },
