@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-22T17:28:06Z",
+  "updated_utc": "2026-11-22T18:12:42Z",
   "global_bias": -14,
   "global_regime": {
     "vix": 35.89,
@@ -21,7 +21,7 @@
     "stablecoins": {
       "total_usd_b": 282.58,
       "chg_7d_pct": -1.57,
-      "chg_30d_pct": -6.16
+      "chg_30d_pct": -6.15
     },
     "fear_greed": {
       "value": 11.0,
@@ -91,7 +91,7 @@
         "netflow7_ratio": -0.0764,
         "netflow_pts": 13.8,
         "ex_supply_30d_pct": 0.79,
-        "stablecoins_30d_pct": -6.16,
+        "stablecoins_30d_pct": -6.15,
         "funding_8h": 0.0,
         "funding_pts": -0.0,
         "fear_greed": 11.0
@@ -121,8 +121,8 @@
         "netflow7_ratio": 0.0058,
         "netflow_pts": -1.0,
         "ex_supply_30d_pct": -3.4,
-        "stablecoins_30d_pct": -6.16,
-        "funding_8h": -2e-06,
+        "stablecoins_30d_pct": -6.15,
+        "funding_8h": -1e-06,
         "funding_pts": 0.0,
         "fear_greed": 11.0
       }
