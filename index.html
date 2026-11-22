@@ -97,13 +97,15 @@
   <div class="container">
     <header>
       <div>
-        <h1>LeadingConfluencePro v2.01 — 24/7 Cloud Quant & ML Intelligence</h1>
+        <h1>LeadingConfluencePro v2.02 — 24/7 Cloud Quant & ML Intelligence</h1>
         <div class="subtitle" id="timestamps">Loading cloud telemetry...</div>
+        <div id="sessionStrip" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;font-size:0.75rem;"></div>
       </div>
       <div class="feed-links">
         <a class="btn" href="https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/MacroFlowBias.csv" target="_blank">MacroFlowBias.csv</a>
         <a class="btn" href="https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/OptimizedConfig.csv" target="_blank">OptimizedConfig.csv</a>
         <a class="btn" href="https://raw.githubusercontent.com/gamehotspot62/mt5-leading-confluence-cloud/main/data/MLModelWeights.csv" target="_blank">MLModelWeights.csv</a>
+        <button class="btn" id="alertToggleBtn" onclick="toggleSoundAlerts()">Alerts: OFF</button>
         <button class="btn" id="refreshBtn" onclick="loadAll(true)">Refresh</button>
       </div>
     </header>
@@ -111,8 +113,9 @@
     <div class="grid-kpi" id="kpiGrid"></div>
 
     <div class="section">
-      <h2>Live Closed-Bar Confirmed Signals (M15 / H1 — 15-Min Cloud Scanner)</h2>
-      <div id="signalsBox" class="neu">Loading latest signals...</div>
+      <h2>Live Closed-Bar Confirmed Signals (Open Markets Only &bull; Browser RT + 15m Cloud)</h2>
+      <div id="signalsBox" class="neu">Loading latest live signals...</div>
+      <div id="closedSignalsBox" style="margin-top:12px;"></div>
     </div>
 
     <div class="section">
@@ -135,7 +138,8 @@
             <th title="100-bar ATR volatility percentile [0..100%]">ATR Pct</th>
             <th title="Causal Higher-Timeframe (H1) bias">HTF</th>
             <th title="Bollinger inside Keltner Volatility Squeeze">Sqz</th>
-            <th title="Active Score threshold & ML win probability gate">Gate / ML</th>
+            <th title="Live closed-bar ML net-profit win probability (BUY% / SELL%) vs active ML Gate">ML Win% (B / S)</th>
+            <th title="Live setup readiness & minimum Confluence Score gate">Setup / Gate</th>
           </tr>
         </thead>
         <tbody id="telemetryBody"></tbody>
@@ -198,10 +202,15 @@
       refSha: "—",
       checkedLocal: "—",
       liveMicro: {},
+      liveSignals: [],
       liveSpot: {},
       liveFng: null,
       liveFunding: {},
       lastTickLocal: "—",
+      alertsEnabled: false,
+      seenSigKeys: new Set(),
+      initialSignalsLoaded: false,
+      cachedBars: {},
     };
 
     const CRYPTO_BINANCE_PAIRS = [
@@ -221,42 +230,162 @@
       return 0.5 * (1.0 + erfApprox(x / Math.SQRT2));
     }
 
-    function getVwapPeriod(sym) {
+    function getSymConfig(sym, tfName) {
       const cfgs = liveState.ml?.optimized_configs || [];
-      const m = cfgs.find(c => String(c.SYMBOL).toUpperCase() === sym && String(c.TIMEFRAME).toUpperCase() === "M15");
-      return m ? Math.max(5, Number(m.VWAP_PERIOD) || 50) : 50;
+      return (
+        cfgs.find(c => String(c.SYMBOL).toUpperCase() === sym && String(c.TIMEFRAME).toUpperCase() === tfName) ||
+        cfgs.find(c => String(c.SYMBOL).toUpperCase() === sym && String(c.TIMEFRAME).toUpperCase() === "M15") ||
+        cfgs.find(c => String(c.SYMBOL).toUpperCase() === "GLOBAL" && String(c.TIMEFRAME).toUpperCase() === "ALL") ||
+        null
+      );
     }
 
-    function computeMicrostructure(bars15m, bars1h, vwapPeriod = 50) {
-      const n = bars15m.length;
-      if (n < 60) return null;
+    function getResolvedMLModel(sym) {
+      const models = liveState.ml?.ml_models;
+      if (models) return models[sym] || models.GLOBAL || null;
+      return null;
+    }
 
-      const atrPeriod = 14, volPeriod = 20, sqzPeriod = 20, kerPeriod = 10, bbMult = 2.0, kcMult = 1.5;
+    function evalMLProbJS(model, feats) {
+      if (!model || !Array.isArray(model.weights) || model.weights.length < 10) return null;
+      let z = Number(model.intercept) || 0.0;
+      for (let k = 0; k < 10; k++) {
+        const m = Number(model.means?.[k]) || 0.0;
+        const rawS = Number(model.stds?.[k]);
+        const s = Math.abs(rawS) > 1e-9 ? rawS : 1.0;
+        const w = Number(model.weights?.[k]) || 0.0;
+        z += w * ((feats[k] - m) / s);
+      }
+      z = Math.max(-20.0, Math.min(20.0, z));
+      return 1.0 / (1.0 + Math.exp(-z));
+    }
+
+    function signalGrade(score, mlProb, mlThresh, direction, macroBias) {
+      const macroAligned = (direction === "BUY" && macroBias >= 15) || (direction === "SELL" && macroBias <= -15);
+      if (score >= 80 && (mlProb == null || mlProb >= mlThresh + 0.05) && macroAligned) return "A+";
+      if (score >= 72 && (mlProb == null || mlProb >= mlThresh + 0.02)) return "A";
+      return "B";
+    }
+
+    function resampleH1ToH4(bars1h, nowMs) {
+      const buckets = new Map();
+      const fourH = 4 * 3600000;
+      for (const b of bars1h) {
+        const key = Math.floor(b.t / fourH) * fourH;
+        const cur = buckets.get(key);
+        if (!cur) {
+          buckets.set(key, { t: key, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v });
+        } else {
+          if (b.h > cur.h) cur.h = b.h;
+          if (b.l < cur.l) cur.l = b.l;
+          cur.c = b.c;
+          cur.v += b.v;
+        }
+      }
+      return Array.from(buckets.values())
+        .sort((a, b) => a.t - b.t)
+        .filter(b => (b.t + fourH) <= nowMs);
+    }
+
+    function computeCausalHTFArray(bars, baseMs, htfBars, htfMs) {
+      const n = bars.length;
+      const out = new Int32Array(n);
+      if (!htfBars || htfBars.length < 10) return out;
+
+      const m = htfBars.length;
+      const htfBias = new Int32Array(m);
+      const htfClose = new Float64Array(m);
+      let ema20 = htfBars[0].c, ema50 = htfBars[0].c;
+      const a20 = 2.0 / 21.0, a50 = 2.0 / 51.0;
+
+      for (let h = 0; h < m; h++) {
+        const hc = htfBars[h].c;
+        if (h > 0) {
+          ema20 = a20 * hc + (1.0 - a20) * ema20;
+          ema50 = a50 * hc + (1.0 - a50) * ema50;
+        }
+        const ws = Math.max(0, h - 29);
+        let stpv = 0, sv = 0;
+        for (let k = ws; k <= h; k++) {
+          const hk = htfBars[k];
+          const vk = Math.max(hk.v, 1.0);
+          stpv += ((hk.h + hk.l + hk.c) / 3.0) * vk;
+          sv += vk;
+        }
+        const hvw = sv > 0 ? (stpv / sv) : hc;
+        if (hc > hvw && ema20 >= ema50) htfBias[h] = 1;
+        else if (hc < hvw && ema20 <= ema50) htfBias[h] = -1;
+        htfClose[h] = htfBars[h].t + htfMs;
+      }
+
+      let hp = 0;
+      for (let i = 0; i < n; i++) {
+        const bt = bars[i].t + baseMs;
+        while (hp + 1 < m && htfClose[hp + 1] <= bt) hp++;
+        if (htfClose[hp] <= bt) out[i] = htfBias[hp];
+      }
+      return out;
+    }
+
+    function evaluateSingleTFJS(sym, tfName, bars, barMs, htfBars, htfMs, macroBias, cfg, mlModel) {
+      const n = bars.length;
+      if (n < 90) return { telemetry: null, signals: [] };
+
+      const minScore = Number(cfg?.MIN_SCORE) || 68;
+      const vwapPeriod = Math.max(5, Number(cfg?.VWAP_PERIOD) || 50);
+      const slBufAtr = Number(cfg?.SL_BUFFER_ATR) || 0.25;
+      const tp1Mult = Number(cfg?.TP1_MULT) || 1.5;
+      const tp2Mult = Number(cfg?.TP2_MULT) || 2.5;
+      const enSweep = cfg ? (Number(cfg.EN_SWEEP) !== 0) : true;
+      const enSqueeze = cfg ? (Number(cfg.EN_SQUEEZE) !== 0) : true;
+      const enPullback = cfg ? (Number(cfg.EN_PULLBACK) !== 0) : true;
+      const mlThresh = Number(cfg?.ML_MIN_PROB) || Number(mlModel?.ml_min_prob) || 0.50;
+
+      const atrPeriod = 14, volPeriod = 20, sqzPeriod = 20, kerPeriod = 14, bbMult = 2.0, kcMult = 1.5;
+      const pivotLeft = 5, pivotRight = 3, minSqzBars = 4, cooldownBars = 6;
       const alphaFast = 2.0 / (sqzPeriod + 1.0);
+      const alphaSlow = 2.0 / 51.0;
+
+      const htfBias = computeCausalHTFArray(bars, barMs, htfBars, htfMs);
       const atr = new Float64Array(n);
       const atrPct = new Float64Array(n).fill(50.0);
       const rvol = new Float64Array(n).fill(1.0);
       const emaFast = new Float64Array(n);
+      const emaSlow = new Float64Array(n);
       const ofi = new Float64Array(n);
+      const delta = new Float64Array(n);
+      const cvd = new Float64Array(n);
+      const vwapVal = new Float64Array(n);
+      const vwapStd = new Float64Array(n);
       const vwapZ = new Float64Array(n);
+      const kcUpper = new Float64Array(n);
+      const kcLower = new Float64Array(n);
       const sqzOn = new Int32Array(n);
+      const sqzCount = new Int32Array(n);
+      const sqzMom = new Float64Array(n);
       const kerRaw = new Float64Array(n);
       const kerSmooth = new Float64Array(n);
 
+      const swHigh = new Float64Array(n);
+      const swHighBar = new Int32Array(n).fill(-1);
+      const swHighCVD = new Float64Array(n);
+      const swLow = new Float64Array(n);
+      const swLowBar = new Int32Array(n).fill(-1);
+      const swLowCVD = new Float64Array(n);
+
       for (let i = 0; i < n; i++) {
-        const bi = bars15m[i];
+        const bi = bars[i];
         const vi = Math.max(bi.v, 1.0);
         if (i > 0) {
           const vs = Math.max(0, i - volPeriod);
           let sumV = 0;
-          for (let k = vs; k < i; k++) sumV += Math.max(bars15m[k].v, 1.0);
-          const avgV = (i > vs) ? (sumV / (i - vs)) : vi;
-          rvol[i] = vi / Math.max(avgV, 1.0);
+          for (let k = vs; k < i; k++) sumV += Math.max(bars[k].v, 1.0);
+          rvol[i] = vi / Math.max((i > vs) ? (sumV / (i - vs)) : vi, 1.0);
         }
 
         let tr = bi.h - bi.l;
         if (i > 0) {
-          const pc = bars15m[i - 1].c;
+          const pc = bars[i - 1].c;
           tr = Math.max(tr, Math.abs(bi.h - pc), Math.abs(bi.l - pc));
         }
         if (i === 0) atr[i] = tr;
@@ -271,6 +400,7 @@
         }
 
         emaFast[i] = (i === 0) ? bi.c : (alphaFast * bi.c + (1.0 - alphaFast) * emaFast[i - 1]);
+        emaSlow[i] = (i === 0) ? bi.c : (alphaSlow * bi.c + (1.0 - alphaSlow) * emaSlow[i - 1]);
 
         let bvcNet = 0.0;
         if (i > 1) {
@@ -278,7 +408,7 @@
           const dp = [];
           let sumDp = 0;
           for (let k = dpS; k <= i; k++) {
-            const d = bars15m[k].c - bars15m[k - 1].c;
+            const d = bars[k].c - bars[k - 1].c;
             dp.push(d);
             sumDp += d;
           }
@@ -287,18 +417,20 @@
           for (let k = 0; k < dp.length; k++) varDp += (dp[k] - meanDp) ** 2;
           const sigDp = Math.sqrt(varDp / dp.length);
           if (sigDp > 1e-12) {
-            const zDp = Math.max(-8.0, Math.min(8.0, (bi.c - bars15m[i - 1].c) / sigDp));
+            const zDp = Math.max(-8.0, Math.min(8.0, (bi.c - bars[i - 1].c) / sigDp));
             bvcNet = 2.0 * ndtr(zDp) - 1.0;
           }
         }
         const rng = bi.h - bi.l;
         const clv = rng > 1e-12 ? (((bi.c - bi.l) - (bi.h - bi.c)) / rng) : 0.0;
         ofi[i] = 0.60 * bvcNet + 0.40 * clv;
+        delta[i] = vi * ofi[i];
+        cvd[i] = (i > 0) ? (cvd[i - 1] + delta[i]) : delta[i];
 
-        const vwS = Math.max(0, i - Math.max(5, vwapPeriod) + 1);
+        const vwS = Math.max(0, i - vwapPeriod + 1);
         let sumTpV = 0, sumVw = 0;
         for (let k = vwS; k <= i; k++) {
-          const bk = bars15m[k];
+          const bk = bars[k];
           const tpk = (bk.h + bk.l + bk.c) / 3.0;
           const vk = Math.max(bk.v, 1.0);
           sumTpV += tpk * vk;
@@ -308,84 +440,386 @@
         let varVw = 0;
         if (sumVw > 0) {
           for (let k = vwS; k <= i; k++) {
-            const bk = bars15m[k];
+            const bk = bars[k];
             const tpk = (bk.h + bk.l + bk.c) / 3.0;
             const vk = Math.max(bk.v, 1.0);
             varVw += vk * ((tpk - vw) ** 2);
           }
         }
         const vstd = sumVw > 0 ? Math.sqrt(varVw / sumVw) : 0.0;
+        vwapVal[i] = vw;
+        vwapStd[i] = vstd;
         const zDen = Math.max(vstd, 0.25 * atr[i]);
         vwapZ[i] = zDen > 1e-12 ? ((bi.c - vw) / zDen) : 0.0;
 
         const sqS = Math.max(0, i - sqzPeriod + 1);
         const sqN = i - sqS + 1;
-        let sumC = 0;
-        for (let k = sqS; k <= i; k++) sumC += bars15m[k].c;
+        let sumC = 0, hh = -Infinity, ll = Infinity;
+        for (let k = sqS; k <= i; k++) {
+          const bk = bars[k];
+          sumC += bk.c;
+          if (bk.h > hh) hh = bk.h;
+          if (bk.l < ll) ll = bk.l;
+        }
         const smaSq = sumC / sqN;
         let varSq = 0;
-        for (let k = sqS; k <= i; k++) varSq += (bars15m[k].c - smaSq) ** 2;
+        for (let k = sqS; k <= i; k++) varSq += (bars[k].c - smaSq) ** 2;
         const bbStd = Math.sqrt(varSq / sqN);
         const bbU = smaSq + bbMult * bbStd;
         const bbL = smaSq - bbMult * bbStd;
-        const kcU = emaFast[i] + kcMult * atr[i];
-        const kcL = emaFast[i] - kcMult * atr[i];
-        sqzOn[i] = (sqN >= sqzPeriod && bbU < kcU && bbL > kcL) ? 1 : 0;
+        kcUpper[i] = emaFast[i] + kcMult * atr[i];
+        kcLower[i] = emaFast[i] - kcMult * atr[i];
+        sqzOn[i] = (sqN >= sqzPeriod && bbU < kcUpper[i] && bbL > kcLower[i]) ? 1 : 0;
+        sqzCount[i] = (sqzOn[i] === 1) ? ((i > 0 ? sqzCount[i - 1] : 0) + 1) : 0;
+
+        if (sqN >= 2) {
+          const midBase = 0.5 * (0.5 * (hh + ll) + smaSq);
+          const xBar = 0.5 * (sqN - 1);
+          const sumXX = sqN * (sqN * sqN - 1.0) / 12.0;
+          if (sumXX > 1e-12) {
+            let sumY = 0, sumXY = 0;
+            for (let k = 0; k < sqN; k++) {
+              const yv = bars[sqS + k].c - midBase;
+              sumY += yv;
+              sumXY += (k - xBar) * yv;
+            }
+            const slope = sumXY / sumXX;
+            const intercept = (sumY / sqN) - slope * xBar;
+            sqzMom[i] = intercept + slope * (sqN - 1);
+          }
+        }
 
         if (i >= kerPeriod) {
-          const netDir = Math.abs(bi.c - bars15m[i - kerPeriod].c);
+          const netDir = Math.abs(bi.c - bars[i - kerPeriod].c);
           let pathVol = 0;
-          for (let k = i - kerPeriod + 1; k <= i; k++) pathVol += Math.abs(bars15m[k].c - bars15m[k - 1].c);
+          for (let k = i - kerPeriod + 1; k <= i; k++) pathVol += Math.abs(bars[k].c - bars[k - 1].c);
           kerRaw[i] = pathVol > 1e-12 ? (netDir / pathVol) : 0.0;
         }
         kerSmooth[i] = (i > 0) ? (0.5 * kerRaw[i] + 0.5 * kerSmooth[i - 1]) : kerRaw[i];
+
+        if (i > 0) {
+          swHigh[i] = swHigh[i - 1]; swHighBar[i] = swHighBar[i - 1]; swHighCVD[i] = swHighCVD[i - 1];
+          swLow[i] = swLow[i - 1];   swLowBar[i] = swLowBar[i - 1];   swLowCVD[i] = swLowCVD[i - 1];
+          if (i >= pivotLeft + pivotRight) {
+            const p = i - pivotRight;
+            let isPH = true, isPL = true;
+            for (let k = p - pivotLeft; k < p; k++) {
+              if (bars[k].h > bars[p].h) isPH = false;
+              if (bars[k].l < bars[p].l) isPL = false;
+            }
+            for (let k = p + 1; k <= i; k++) {
+              if (bars[k].h >= bars[p].h) isPH = false;
+              if (bars[k].l <= bars[p].l) isPL = false;
+            }
+            if (isPH) { swHigh[i] = bars[p].h; swHighBar[i] = p; swHighCVD[i] = cvd[p]; }
+            if (isPL) { swLow[i] = bars[p].l;  swLowBar[i] = p;  swLowCVD[i] = cvd[p]; }
+          }
+        }
       }
 
-      const lastIdx = n - 1;
-      const lastBar = bars15m[lastIdx];
-      let htfBias = 0;
-      if (bars1h && bars1h.length >= 10) {
-        const btMs = lastBar.t + 900000;
-        const completedH1 = bars1h.filter(hb => (hb.t + 3600000) <= btMs);
-        const m = completedH1.length;
-        if (m >= 10) {
-          let ema20 = completedH1[0].c, ema50 = completedH1[0].c;
-          const a20 = 2.0 / 21.0, a50 = 2.0 / 51.0;
-          for (let h = 0; h < m; h++) {
-            const hc = completedH1[h].c;
-            if (h > 0) {
-              ema20 = a20 * hc + (1.0 - a20) * ema20;
-              ema50 = a50 * hc + (1.0 - a50) * ema50;
-            }
-            if (h === m - 1) {
-              const ws = Math.max(0, h - 29);
-              let stpv = 0, sv = 0;
-              for (let k = ws; k <= h; k++) {
-                const hk = completedH1[k];
-                const vk = Math.max(hk.v, 1.0);
-                stpv += ((hk.h + hk.l + hk.c) / 3.0) * vk;
-                sv += vk;
-              }
-              const hvw = sv > 0 ? (stpv / sv) : hc;
-              if (hc > hvw && ema20 >= ema50) htfBias = 1;
-              else if (hc < hvw && ema20 <= ema50) htfBias = -1;
+      const warmup = Math.max(65, Math.max(vwapPeriod, sqzPeriod, volPeriod, atrPeriod, kerPeriod) + pivotLeft + pivotRight + 10);
+      let lastSigBar = -10000, lastSigDir = 0, buyReset = 1, sellReset = 1;
+      const lastClosedIdx = n - 1;
+      const maxBarsLookback = (tfName === "M15") ? 5 : 2;
+      const maxAgeMs = (tfName === "M15") ? (3 * 3600000) : (6 * 3600000);
+      const nowMs = Date.now();
+      const signals = [];
+      let latestSigDir = 0;
+
+      for (let i = 1; i < n; i++) {
+        if (bars[i].c < vwapVal[i]) buyReset = 1;
+        if (bars[i].c > vwapVal[i]) sellReset = 1;
+        if (i < warmup) continue;
+
+        const bi = bars[i], at = atr[i], rng = bi.h - bi.l;
+        if (at <= 1e-10 || rng < 0.25 * at) continue;
+        const recentSqz = (sqzCount[i - 1] >= minSqzBars || sqzCount[i - 2] >= minSqzBars || sqzCount[i - 3] >= minSqzBars);
+        if (atrPct[i] < 8.0 && !recentSqz) continue;
+        if ((i - lastSigBar) < cooldownBars) continue;
+
+        const clvI = rng > 1e-12 ? (((bi.c - bi.l) - (bi.h - bi.c)) / rng) : 0.0;
+        const body = bi.c - bi.o;
+        const lowWick = Math.min(bi.o, bi.c) - bi.l;
+        const upWick = bi.h - Math.max(bi.o, bi.c);
+
+        const bullVSA = (rvol[i] >= 1.30 && clvI >= 0.35 && (lowWick >= 0.35 * rng || body >= 0.50 * at));
+        const bearVSA = (rvol[i] >= 1.30 && clvI <= -0.35 && (upWick >= 0.35 * rng || (-body) >= 0.50 * at));
+        const bullFvgDisp = ((i >= 2 && bi.l > bars[i - 2].h) || (body >= 0.65 * at && rvol[i] >= 1.25 && clvI >= 0.50)) ? 1.0 : 0.0;
+        const bearFvgDisp = ((i >= 2 && bi.h < bars[i - 2].l) || ((-body) >= 0.65 * at && rvol[i] >= 1.25 && clvI <= -0.50)) ? 1.0 : 0.0;
+
+        const sumVol3 = Math.max(bars[i].v, 1) + Math.max(bars[i - 1].v, 1) + Math.max(bars[i - 2].v, 1);
+        const netDelta3 = (delta[i] + delta[i - 1] + delta[i - 2]) / Math.max(sumVol3, 1.0);
+        const vwapSlope = vwapVal[i] - vwapVal[i - 3];
+        const ker = kerSmooth[i], htfB = htfBias[i], z = vwapZ[i], mb = Number(macroBias) || 0;
+
+        let trigBSw = false, trigBSq = false, trigBPl = false, bExt = bi.l;
+        if (enSweep && swLow[i - 1] > 0 && (i - swLowBar[i - 1]) <= 80) {
+          const swl = swLow[i - 1];
+          const swNow = bi.l < swl - 0.05 * at;
+          const swPrv = (bars[i - 1].l < swl - 0.05 * at) && (bars[i - 1].l > swl - 2.5 * at);
+          if ((swNow || swPrv) && bi.c > swl && (bi.c > bi.o || clvI >= 0.45) && ofi[i] >= 0.15 && z <= 1.2 && !(htfB === -1 && ker >= 0.45)) {
+            trigBSw = true;
+            bExt = swPrv ? Math.min(bi.l, bars[i - 1].l) : bi.l;
+          }
+        }
+        if (enSqueeze) {
+          let maxH5 = -Infinity;
+          for (let k = i - 5; k < i; k++) if (bars[k].h > maxH5) maxH5 = bars[k].h;
+          if (recentSqz && sqzOn[i] === 0 && bi.c > kcUpper[i] && bi.c > maxH5 && sqzMom[i] > 0 && sqzMom[i] > sqzMom[i - 1] && rvol[i] >= 1.20 && clvI >= 0.35 && ofi[i] >= 0.25 && z <= 2.2 && htfB >= 0) {
+            trigBSq = true;
+            const lm = Math.min(bi.l, bars[i - 1].l);
+            bExt = trigBSw ? Math.min(bExt, lm) : lm;
+          }
+        }
+        if (enPullback) {
+          const trendSup = (htfB === 1) || (ker >= 0.25 && vwapSlope > 0 && emaFast[i] > emaSlow[i]);
+          const touched = (bi.l <= vwapVal[i] + 0.25 * at) || (bars[i - 1].l <= vwapVal[i - 1] + 0.25 * at);
+          const held = bi.l >= vwapVal[i] - 2.2 * vwapStd[i];
+          const confC = bi.c > bi.o && bi.c > vwapVal[i] && clvI >= 0.35 && (bi.c > bars[i - 1].h || body >= 0.40 * at);
+          if (trendSup && touched && held && confC && ofi[i] >= 0.20 && rvol[i] >= 1.00 && z <= 1.8) {
+            trigBPl = true;
+            const pm = Math.min(bi.l, bars[i - 1].l);
+            bExt = (trigBSw || trigBSq) ? Math.min(bExt, pm) : pm;
+          }
+        }
+
+        let trigSSw = false, trigSSq = false, trigSPl = false, sExt = bi.h;
+        if (enSweep && swHigh[i - 1] > 0 && (i - swHighBar[i - 1]) <= 80) {
+          const swh = swHigh[i - 1];
+          const swNow = bi.h > swh + 0.05 * at;
+          const swPrv = (bars[i - 1].h > swh + 0.05 * at) && (bars[i - 1].h < swh + 2.5 * at);
+          if ((swNow || swPrv) && bi.c < swh && (bi.c < bi.o || clvI <= -0.45) && ofi[i] <= -0.15 && z >= -1.2 && !(htfB === 1 && ker >= 0.45)) {
+            trigSSw = true;
+            sExt = swPrv ? Math.max(bi.h, bars[i - 1].h) : bi.h;
+          }
+        }
+        if (enSqueeze) {
+          let minL5 = Infinity;
+          for (let k = i - 5; k < i; k++) if (bars[k].l < minL5) minL5 = bars[k].l;
+          if (recentSqz && sqzOn[i] === 0 && bi.c < kcLower[i] && bi.c < minL5 && sqzMom[i] < 0 && sqzMom[i] < sqzMom[i - 1] && rvol[i] >= 1.20 && clvI <= -0.35 && ofi[i] <= -0.25 && z >= -2.2 && htfB <= 0) {
+            trigSSq = true;
+            const hm = Math.max(bi.h, bars[i - 1].h);
+            sExt = trigSSw ? Math.max(sExt, hm) : hm;
+          }
+        }
+        if (enPullback) {
+          const trendSup = (htfB === -1) || (ker >= 0.25 && vwapSlope < 0 && emaFast[i] < emaSlow[i]);
+          const touched = (bi.h >= vwapVal[i] - 0.25 * at) || (bars[i - 1].h >= vwapVal[i - 1] - 0.25 * at);
+          const held = bi.h <= vwapVal[i] + 2.2 * vwapStd[i];
+          const confC = bi.c < bi.o && bi.c < vwapVal[i] && clvI <= -0.35 && (bi.c < bars[i - 1].l || (-body) >= 0.40 * at);
+          if (trendSup && touched && held && confC && ofi[i] <= -0.20 && rvol[i] >= 1.00 && z >= -1.8) {
+            trigSPl = true;
+            const pm = Math.max(bi.h, bars[i - 1].h);
+            sExt = (trigSSw || trigSSq) ? Math.max(sExt, pm) : pm;
+          }
+        }
+
+        let bScore = 0, bPB = "None";
+        const bCnt = (trigBSw ? 1 : 0) + (trigBSq ? 1 : 0) + (trigBPl ? 1 : 0);
+        if (bCnt > 0) {
+          bPB = bCnt > 1 ? "MultiConf" : (trigBSw ? "Sweep/SFP" : (trigBSq ? "SqzBreak" : "VWAPPull"));
+          bScore += 25;
+          bScore += ofi[i] >= 0.35 ? 10 : (ofi[i] >= 0.15 ? 6 : 0);
+          bScore += netDelta3 >= 0.12 ? 5 : (netDelta3 > 0 ? 2 : 0);
+          if ((trigBSw && swLow[i - 1] > 0 && cvd[i] > swLowCVD[i - 1]) || bullVSA) bScore += 5;
+          bScore += rvol[i] >= 1.50 ? 10 : (rvol[i] >= 1.20 ? 7 : (rvol[i] >= 1.00 ? 4 : 0));
+          if (bullVSA) bScore += 5;
+          if (trigBSw) bScore += z <= 0.25 ? 15 : (z <= 0.85 ? 10 : 4);
+          else bScore += (z >= -0.25 && z <= 1.25) ? 15 : (z <= 1.85 ? 10 : 4);
+          bScore += (htfB === 1) ? 10 : (htfB === 0 ? 5 : 0);
+          if (trigBSw && ker <= 0.38) bScore += 5;
+          else if ((trigBSq || trigBPl) && ker >= 0.28) bScore += 5;
+          else bScore += 3;
+          bScore += clvI >= 0.55 ? 5 : (clvI >= 0.35 ? 3 : 0);
+          if (bi.c > bars[i - 1].h) bScore += 5;
+          if (bullFvgDisp > 0.5) bScore += 4;
+          bScore += Math.round(0.15 * mb);
+          bScore = Math.max(0, Math.min(100, bScore));
+        }
+
+        let sScore = 0, sPB = "None";
+        const sCnt = (trigSSw ? 1 : 0) + (trigSSq ? 1 : 0) + (trigSPl ? 1 : 0);
+        if (sCnt > 0) {
+          sPB = sCnt > 1 ? "MultiConf" : (trigSSw ? "Sweep/SFP" : (trigSSq ? "SqzBreak" : "VWAPPull"));
+          sScore += 25;
+          sScore += ofi[i] <= -0.35 ? 10 : (ofi[i] <= -0.15 ? 6 : 0);
+          sScore += netDelta3 <= -0.12 ? 5 : (netDelta3 < 0 ? 2 : 0);
+          if ((trigSSw && swHigh[i - 1] > 0 && cvd[i] < swHighCVD[i - 1]) || bearVSA) sScore += 5;
+          sScore += rvol[i] >= 1.50 ? 10 : (rvol[i] >= 1.20 ? 7 : (rvol[i] >= 1.00 ? 4 : 0));
+          if (bearVSA) sScore += 5;
+          if (trigSSw) sScore += z >= -0.25 ? 15 : (z >= -0.85 ? 10 : 4);
+          else sScore += (z <= 0.25 && z >= -1.25) ? 15 : (z >= -1.85 ? 10 : 4);
+          sScore += (htfB === -1) ? 10 : (htfB === 0 ? 5 : 0);
+          if (trigSSw && ker <= 0.38) sScore += 5;
+          else if ((trigSSq || trigSPl) && ker >= 0.28) sScore += 5;
+          else sScore += 3;
+          sScore += clvI <= -0.55 ? 5 : (clvI <= -0.35 ? 3 : 0);
+          if (bi.c < bars[i - 1].l) sScore += 5;
+          if (bearFvgDisp > 0.5) sScore += 4;
+          sScore -= Math.round(0.15 * mb);
+          sScore = Math.max(0, Math.min(100, sScore));
+        }
+
+        const bOk = (bScore >= minScore) && ((lastSigDir !== 1) || (buyReset === 1));
+        const sOk = (sScore >= minScore) && ((lastSigDir !== -1) || (sellReset === 1));
+        let finalDir = 0;
+        if (bOk && !sOk) finalDir = 1;
+        else if (sOk && !bOk) finalDir = -1;
+        else if (bOk && sOk) finalDir = bScore > sScore ? 1 : (sScore > bScore ? -1 : 0);
+
+        if (finalDir !== 0) {
+          const entry = bi.c;
+          const rawRisk = finalDir === 1 ? Math.abs(entry - (bExt - slBufAtr * at)) : Math.abs((sExt + slBufAtr * at) - entry);
+          const risk = Math.max(0.80 * at, Math.min(2.50 * at, rawRisk));
+          const sl = finalDir === 1 ? (entry - risk) : (entry + risk);
+          const tp1 = finalDir === 1 ? (entry + tp1Mult * risk) : (entry - tp1Mult * risk);
+          const tp2 = finalDir === 1 ? (entry + tp2Mult * risk) : (entry - tp2Mult * risk);
+          const scoreVal = finalDir === 1 ? bScore : sScore;
+          const pbName = finalDir === 1 ? bPB : sPB;
+          const fvgAln = finalDir === 1 ? bullFvgDisp : bearFvgDisp;
+
+          if (finalDir === 1) { buyReset = 0; sellReset = 1; } else { sellReset = 0; buyReset = 1; }
+          lastSigBar = i;
+          lastSigDir = finalDir;
+
+          const feats = [
+            finalDir * ofi[i],
+            finalDir * netDelta3,
+            Math.min(rvol[i], 5.0),
+            finalDir * z,
+            ker,
+            finalDir * htfB,
+            finalDir * clvI,
+            atrPct[i] / 100.0,
+            fvgAln,
+            (finalDir * mb) / 100.0,
+          ];
+          const prob = evalMLProbJS(mlModel, feats);
+          if (prob === null || prob >= mlThresh) {
+            if (i === lastClosedIdx) latestSigDir = finalDir;
+            if (i >= lastClosedIdx - maxBarsLookback && (nowMs - bi.t) <= maxAgeMs) {
+              const dirStr = finalDir === 1 ? "BUY" : "SELL";
+              signals.push({
+                symbol: sym,
+                timeframe: tfName,
+                bar_time_utc: new Date(bi.t).toISOString().slice(0, 16) + "Z",
+                is_fresh_closed_bar: i === lastClosedIdx,
+                market_open: true,
+                direction: dirStr,
+                playbook: pbName,
+                grade: signalGrade(scoreVal, prob, mlThresh, dirStr, mb),
+                score: scoreVal,
+                ml_prob: prob != null ? Number(prob.toFixed(3)) : null,
+                macro_bias: mb,
+                entry: Number(entry.toFixed(6)),
+                sl: Number(sl.toFixed(6)),
+                sl_dist_pct: Number((Math.abs(entry - sl) / Math.max(Math.abs(entry), 1e-9) * 100.0).toFixed(2)),
+                tp1: Number(tp1.toFixed(6)),
+                tp2: Number(tp2.toFixed(6)),
+                source: "LIVE_RT",
+              });
             }
           }
         }
       }
 
+      if (tfName !== "M15") return { telemetry: null, signals };
+
+      const idx = lastClosedIdx, bi = bars[idx], rng = bi.h - bi.l;
+      const clvL = rng > 1e-12 ? (((bi.c - bi.l) - (bi.h - bi.c)) / rng) : 0.0;
+      const bodyL = bi.c - bi.o, atL = atr[idx];
+      const sv3 = Math.max(bars[idx].v, 1) + Math.max(bars[idx - 1].v, 1) + Math.max(bars[idx - 2].v, 1);
+      const nd3 = (delta[idx] + delta[idx - 1] + delta[idx - 2]) / Math.max(sv3, 1.0);
+      const bFvgL = ((bi.l > bars[idx - 2].h) || (bodyL >= 0.65 * atL && rvol[idx] >= 1.25 && clvL >= 0.50)) ? 1.0 : 0.0;
+      const sFvgL = ((bi.h < bars[idx - 2].l) || ((-bodyL) >= 0.65 * atL && rvol[idx] >= 1.25 && clvL <= -0.50)) ? 1.0 : 0.0;
+
+      const makeFeats = (d) => [
+        d * ofi[idx], d * nd3, Math.min(rvol[idx], 5.0), d * vwapZ[idx], kerSmooth[idx],
+        d * htfBias[idx], d * clvL, atrPct[idx] / 100.0, d === 1 ? bFvgL : sFvgL, (d * (Number(macroBias) || 0)) / 100.0,
+      ];
+      const pBuy = evalMLProbJS(mlModel, makeFeats(1));
+      const pSell = evalMLProbJS(mlModel, makeFeats(-1));
+
+      let setupStatus = "WAIT";
+      if (latestSigDir === 1) setupStatus = "CONFIRMED BUY";
+      else if (latestSigDir === -1) setupStatus = "CONFIRMED SELL";
+      else if (sqzOn[idx] === 1) setupStatus = "SQZ COILING";
+      else if (Math.abs(vwapZ[idx]) >= 1.1 && Math.abs(ofi[idx]) >= 0.15) setupStatus = "NEAR SWEEP";
+      else if (htfBias[idx] !== 0 && kerSmooth[idx] >= 0.25) setupStatus = "TREND WATCH";
+
       return {
-        close: Number(lastBar.c.toFixed(5)),
-        bar_time_utc: new Date(lastBar.t).toISOString().slice(0, 16) + "Z",
-        market_open: true,
-        ofi: Number(ofi[lastIdx].toFixed(3)),
-        rvol: Number(rvol[lastIdx].toFixed(2)),
-        vwap_z: Number(vwapZ[lastIdx].toFixed(2)),
-        ker: Number(kerSmooth[lastIdx].toFixed(2)),
-        atr_pct: Number(atrPct[lastIdx].toFixed(1)),
-        sqz_on: sqzOn[lastIdx],
-        htf_bias: htfBias,
+        telemetry: {
+          close: Number(bi.c.toFixed(5)),
+          bar_time_utc: new Date(bi.t).toISOString().slice(0, 16) + "Z",
+          market_open: true,
+          ofi: Number(ofi[idx].toFixed(3)),
+          rvol: Number(rvol[idx].toFixed(2)),
+          vwap_z: Number(vwapZ[idx].toFixed(2)),
+          ker: Number(kerSmooth[idx].toFixed(2)),
+          atr_pct: Number(atrPct[idx].toFixed(1)),
+          sqz_on: sqzOn[idx],
+          htf_bias: htfBias[idx],
+          min_score: minScore,
+          ml_min_prob: Number(mlThresh.toFixed(2)),
+          ml_buy_prob: pBuy != null ? Number(pBuy.toFixed(3)) : null,
+          ml_sell_prob: pSell != null ? Number(pSell.toFixed(3)) : null,
+          setup_status: setupStatus,
+        },
+        signals,
       };
+    }
+
+    function recomputeCachedLiveSignals() {
+      const nextSignals = [];
+      const nowMs = Date.now();
+      for (const { sym } of CRYPTO_BINANCE_PAIRS) {
+        const cached = liveState.cachedBars[sym];
+        if (!cached) continue;
+        const { closed15, closed1h } = cached;
+        const macroBias = liveState.macro?.symbols?.[sym]?.bias_score ?? (liveState.signals?.telemetry?.find(t => t.symbol === sym)?.macro_bias ?? 0);
+        const mlModel = getResolvedMLModel(sym);
+        const r15 = evaluateSingleTFJS(sym, "M15", closed15, 900000, closed1h, 3600000, macroBias, getSymConfig(sym, "M15"), mlModel);
+        const closed4h = resampleH1ToH4(closed1h, nowMs);
+        const r1h = evaluateSingleTFJS(sym, "H1", closed1h, 3600000, closed4h, 14400000, macroBias, getSymConfig(sym, "H1"), mlModel);
+        if (r15.telemetry) liveState.liveMicro[sym] = r15.telemetry;
+        nextSignals.push(...r15.signals, ...r1h.signals);
+      }
+      liveState.liveSignals = nextSignals;
+    }
+
+    function playAlertChime() {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        const ctx = new Ctx();
+        [587.33, 880.0].forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.08, ctx.currentTime + idx * 0.14);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + idx * 0.14 + 0.25);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(ctx.currentTime + idx * 0.14);
+          osc.stop(ctx.currentTime + idx * 0.14 + 0.26);
+        });
+      } catch (_) {}
+    }
+
+    function toggleSoundAlerts() {
+      liveState.alertsEnabled = !liveState.alertsEnabled;
+      const btn = document.getElementById("alertToggleBtn");
+      if (btn) {
+        btn.textContent = liveState.alertsEnabled ? "Alerts: ON" : "Alerts: OFF";
+        btn.style.color = liveState.alertsEnabled ? "var(--green)" : "var(--blue)";
+      }
+      if (liveState.alertsEnabled) {
+        playAlertChime();
+        if ("Notification" in window && Notification.permission === "default") {
+          Notification.requestPermission().catch(() => {});
+        }
+      }
     }
 
     function updateSpotPrice(sym, price, src) {
@@ -444,13 +878,13 @@
       await Promise.all(CRYPTO_BINANCE_PAIRS.map(async ({ sym, pair }) => {
         try {
           const [r15, r1h] = await Promise.all([
-            fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=15m&limit=250`, { cache: "no-store" }),
-            fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=1h&limit=120`, { cache: "no-store" }),
+            fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=15m&limit=300`, { cache: "no-store" }),
+            fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=1h&limit=200`, { cache: "no-store" }),
           ]);
           if (!r15.ok) return;
           const raw15 = await r15.json();
           const raw1h = r1h.ok ? await r1h.json() : [];
-          if (!Array.isArray(raw15) || raw15.length < 60) return;
+          if (!Array.isArray(raw15) || raw15.length < 90) return;
 
           const latestClose = Number(raw15[raw15.length - 1][4]);
           if (!liveState.liveSpot[sym] && Number.isFinite(latestClose)) {
@@ -464,17 +898,18 @@
             ? raw1h.filter(k => Number(k[6]) <= nowMs).map(k => ({ t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]), v: Number(k[5]) }))
             : [];
 
-          const micro = computeMicrostructure(closed15, closed1h, getVwapPeriod(sym));
-          if (micro) {
-            liveState.liveMicro[sym] = micro;
-            anyDone = true;
-          }
+          liveState.cachedBars[sym] = { closed15, closed1h };
+          anyDone = true;
         } catch (_) {}
       }));
       if (anyDone) {
+        recomputeCachedLiveSignals();
         if (liveState.lastTickLocal === "—") liveState.lastTickLocal = new Date().toLocaleTimeString();
         renderHeader();
-        if (liveState.signals) renderTelemetry(liveState.signals, liveState.macro);
+        if (liveState.signals) {
+          renderSignals(liveState.signals);
+          renderTelemetry(liveState.signals, liveState.macro);
+        }
       }
     }
 
@@ -492,6 +927,35 @@
       } catch (_) {}
     }
 
+    function renderSessionStrip() {
+      const el = document.getElementById("sessionStrip");
+      if (!el) return;
+      const d = new Date();
+      const day = d.getUTCDay();
+      const mins = d.getUTCHours() * 60 + d.getUTCMinutes();
+      const isWeekend = (day === 6) || (day === 5 && mins >= 22 * 60) || (day === 0 && mins < 22 * 60);
+      const utcStr = d.toISOString().slice(11, 16) + " UTC";
+      const pills = [
+        `<span class="pill">Clock: ${utcStr}</span>`,
+        `<span class="pill pill-bull"><span class="live-dot"></span>CRYPTO 24/7</span>`,
+      ];
+      if (isWeekend) {
+        pills.push(`<span class="pill pill-warn">WEEKEND: FX / METALS / INDICES CLOSED</span>`);
+      } else {
+        const inWin = (a, b) => (a < b) ? (mins >= a && mins < b) : (mins >= a || mins < b);
+        const sessions = [
+          ["SYDNEY", inWin(21 * 60, 6 * 60)],
+          ["TOKYO", inWin(0, 9 * 60)],
+          ["LONDON", inWin(7 * 60, 16 * 60)],
+          ["NEW YORK", inWin(12 * 60, 21 * 60)],
+        ];
+        sessions.forEach(([name, on]) => {
+          pills.push(`<span class="pill ${on ? "pill-bull" : ""}">${name}: ${on ? "OPEN" : "OFF"}</span>`);
+        });
+      }
+      el.innerHTML = pills.join("");
+    }
+
     function renderHeader() {
       const macro = liveState.macro;
       const signals = liveState.signals;
@@ -503,6 +967,7 @@
       }
       document.getElementById("timestamps").textContent =
         `Macro Sync: ${macro?.updated_utc || "—"} | Cloud Scan: ${signals?.updated_utc || "—"} (${ageTxt}) | Live Tick: ${liveState.lastTickLocal} | ML: ${ml?.updated_utc || "—"} | Checked: ${liveState.checkedLocal} (${liveState.refSha}) • Auto: 10s live / 2m cloud`;
+      renderSessionStrip();
     }
 
     async function resolveDataBase() {
@@ -556,6 +1021,7 @@
         liveState.refSha = ref.sha;
         liveState.checkedLocal = new Date().toLocaleTimeString();
 
+        recomputeCachedLiveSignals();
         renderHeader();
         renderKPIs(macro);
         renderSignals(signals);
@@ -597,31 +1063,93 @@
         </div>`).join("");
     }
 
-    function renderSignals(signals) {
-      const box = document.getElementById("signalsBox");
-      const list = signals?.recent_confirmed_signals || [];
-      if (!list.length) {
-        box.innerHTML = `<div class="neu">No confirmed signals within the last 3 closed M15/H1 bars. Scanner runs automatically every 15 minutes on GitHub Actions.</div>`;
-        return;
-      }
-      box.innerHTML = `<div class="sig-grid">${list.map(s => {
+    function renderSignalCardsHTML(list, muted = false) {
+      return `<div class="sig-grid">${list.map(s => {
         const isBuy = s.direction === "BUY";
         const mlTxt = s.ml_prob != null ? ` &bull; ML ${(s.ml_prob * 100).toFixed(0)}%` : "";
+        const gradeCls = s.grade === "A+" ? "pill-bull" : (s.grade === "A" ? "pill-warn" : "");
+        const rtBadge = s.source === "LIVE_RT" ? `<span class="pill pill-bull"><span class="live-dot"></span>LIVE RT</span>` : "";
+        const closedBadge = muted ? `<span class="pill">CLOSED</span>` : "";
+        const slPctTxt = s.sl_dist_pct != null ? ` (${s.sl_dist_pct}%)` : "";
         return `
-          <div class="sig-card ${isBuy ? "sig-buy" : "sig-sell"}">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div class="sig-card ${isBuy ? "sig-buy" : "sig-sell"}" style="${muted ? "opacity:0.75;" : ""}">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px;">
               <strong>${s.symbol} ${s.timeframe}</strong>
-              <span class="pill ${isBuy ? "pill-bull" : "pill-bear"}">${s.direction} (${s.playbook})</span>
+              <div style="display:flex;gap:5px;align-items:center;">
+                ${rtBadge}${closedBadge}
+                <span class="pill ${gradeCls}">${s.grade || "B"}</span>
+                <span class="pill ${isBuy ? "pill-bull" : "pill-bear"}">${s.direction} (${s.playbook})</span>
+              </div>
             </div>
             <div style="font-size:0.82rem;color:var(--muted);margin-bottom:8px;">
               Closed: ${s.bar_time_utc} &bull; Score <strong>${s.score}/100</strong>${mlTxt} &bull; Macro ${s.macro_bias >= 0 ? "+" : ""}${s.macro_bias}
             </div>
             <div style="font-family:monospace;font-size:0.83rem;">
-              Entry: ${s.entry} | SL: <span class="neg">${s.sl}</span><br/>
+              Entry: ${s.entry} | SL: <span class="neg">${s.sl}</span>${slPctTxt}<br/>
               TP1: <span class="pos">${s.tp1}</span> | TP2: <span class="pos">${s.tp2}</span>
             </div>
           </div>`;
       }).join("")}</div>`;
+    }
+
+    function renderSignals(signals) {
+      const box = document.getElementById("signalsBox");
+      const closedBox = document.getElementById("closedSignalsBox");
+      const nowMs = Date.now();
+
+      const mergedMap = new Map();
+      const pushSig = (s) => {
+        if (!s || s.market_open === false) return;
+        const barMs = Date.parse(s.bar_time_utc);
+        const maxAge = (s.timeframe === "M15") ? (4 * 3600000) : (8 * 3600000);
+        if (Number.isFinite(barMs) && (nowMs - barMs) > maxAge) return;
+        const key = `${s.symbol}|${s.timeframe}|${s.bar_time_utc}|${s.direction}`;
+        const existing = mergedMap.get(key);
+        if (!existing || s.source === "LIVE_RT") mergedMap.set(key, s);
+      };
+
+      (signals?.recent_confirmed_signals || []).forEach(pushSig);
+      (liveState.liveSignals || []).forEach(pushSig);
+
+      const list = Array.from(mergedMap.values()).sort((a, b) => (b.bar_time_utc || "").localeCompare(a.bar_time_utc || ""));
+
+      if (!liveState.initialSignalsLoaded) {
+        list.forEach(s => liveState.seenSigKeys.add(`${s.symbol}|${s.timeframe}|${s.bar_time_utc}|${s.direction}`));
+        if (signals || liveState.liveSignals.length > 0) liveState.initialSignalsLoaded = true;
+      } else {
+        const freshOnes = [];
+        list.forEach(s => {
+          const k = `${s.symbol}|${s.timeframe}|${s.bar_time_utc}|${s.direction}`;
+          if (!liveState.seenSigKeys.has(k)) {
+            liveState.seenSigKeys.add(k);
+            freshOnes.push(s);
+          }
+        });
+        if (freshOnes.length > 0 && liveState.alertsEnabled) {
+          playAlertChime();
+          if ("Notification" in window && Notification.permission === "granted") {
+            const top = freshOnes[0];
+            new Notification(`${top.symbol} ${top.timeframe} ${top.direction} (${top.playbook})`, {
+              body: `Score ${top.score}/100 | Entry ${top.entry} | SL ${top.sl} | TP1 ${top.tp1}`,
+            });
+          }
+        }
+      }
+
+      if (!list.length) {
+        box.innerHTML = `<div class="neu">No confirmed signals on currently OPEN markets within the last 3h (M15) / 6h (H1). Browser evaluates BTC/ETH every 30s directly from Binance and cloud scans all 10 assets every ~15 minutes.</div>`;
+      } else {
+        box.innerHTML = renderSignalCardsHTML(list, false);
+      }
+
+      const closedList = signals?.closed_market_last_signals || [];
+      if (closedBox) {
+        if (closedList.length > 0) {
+          closedBox.innerHTML = `<details><summary style="cursor:pointer;color:var(--muted);font-size:0.84rem;">Closed-Market Last Session Signals (${closedList.length} — Market Closed, Reference Only)</summary><div style="margin-top:10px;">${renderSignalCardsHTML(closedList, true)}</div></details>`;
+        } else {
+          closedBox.innerHTML = "";
+        }
+      }
     }
 
     function renderTelemetry(signals, macro) {
@@ -630,7 +1158,7 @@
       const baseRows = signals?.telemetry || [];
       if (!baseRows.length) {
         if (notice) notice.style.display = "none";
-        tb.innerHTML = `<tr><td colspan="15" class="neu">No telemetry available yet.</td></tr>`;
+        tb.innerHTML = `<tr><td colspan="16" class="neu">No telemetry available yet.</td></tr>`;
         return;
       }
       let closedCount = 0;
@@ -659,6 +1187,23 @@
           : "";
         const barTxt = r.bar_time_utc ? r.bar_time_utc.slice(5) : "—";
 
+        const gatePct = (r.ml_min_prob != null) ? (r.ml_min_prob * 100).toFixed(0) : "—";
+        const pBuy = r.ml_buy_prob != null ? (r.ml_buy_prob * 100).toFixed(0) : null;
+        const pSell = r.ml_sell_prob != null ? (r.ml_sell_prob * 100).toFixed(0) : null;
+        let mlCellHtml = `<span class="neu">Gate &ge;${gatePct}%</span>`;
+        if (pBuy !== null && pSell !== null) {
+          const bPass = r.ml_buy_prob >= r.ml_min_prob;
+          const sPass = r.ml_sell_prob >= r.ml_min_prob;
+          mlCellHtml = `<span class="${bPass ? "pos" : "neu"}">B ${pBuy}%</span> / <span class="${sPass ? "neg" : "neu"}">S ${pSell}%</span><div style="font-size:0.72rem;color:var(--muted)">Gate &ge;${gatePct}%</div>`;
+        }
+
+        const stTxt = r.setup_status || "WAIT";
+        let stCls = "";
+        if (stTxt === "CONFIRMED BUY") stCls = "pill-bull";
+        else if (stTxt === "CONFIRMED SELL") stCls = "pill-bear";
+        else if (stTxt === "SQZ COILING" || stTxt === "NEAR SWEEP") stCls = "pill-warn";
+        const setupCell = `<span class="pill ${stCls}">${stTxt}</span><div style="font-size:0.72rem;color:var(--muted)">Score &ge;${r.min_score}</div>`;
+
         return `<tr>
           <td><strong>${r.symbol}</strong></td>
           <td class="neu">${r.asset_class}</td>
@@ -674,13 +1219,14 @@
           <td>${fmt(r.atr_pct,0)}%</td>
           <td>${htf}</td>
           <td>${sqz}</td>
-          <td>${r.min_score}+ / ML ${(r.ml_min_prob*100).toFixed(0)}%</td>
+          <td>${mlCellHtml}</td>
+          <td>${setupCell}</td>
         </tr>`;
       }).join("");
       if (notice) {
         if (closedCount >= 5) {
           notice.style.display = "block";
-          notice.textContent = `Notice: ${closedCount} of ${baseRows.length} symbols are currently outside market hours (weekend / session close) and display their last closed Friday M15 bar. Live 24/7 Crypto (BTCUSD, ETHUSD) streams real-time spot every 10s and recalculates closed M15 microstructure every 30s directly from exchange feeds.`;
+          notice.textContent = `Notice: ${closedCount} of ${baseRows.length} symbols are currently outside market hours (weekend / session close) and display their last closed Friday M15 bar. Live 24/7 Crypto (BTCUSD, ETHUSD) streams real-time spot every 10s and runs the full Playbook + ML signal engine every 30s directly from exchange feeds.`;
         } else {
           notice.style.display = "none";
         }
@@ -696,7 +1242,7 @@
       sumEl.innerHTML = `
         <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:0.86rem;">
           <div>Samples: <strong>${g.samples ?? "—"}</strong> (OOS ${g.oos_samples ?? "—"})</div>
-          <div>Active ML Gate: <strong>&ge; ${g.ml_min_prob ? (g.ml_min_prob * 100).toFixed(0) + "%" : "—"}</strong></div>
+          <div>Global ML Gate: <strong>&ge; ${g.ml_min_prob ? (g.ml_min_prob * 100).toFixed(0) + "%" : "—"}</strong></div>
           <div>Logistic OOS AUC: <strong>${g.auc_lr ?? "—"}</strong> (Brier ${g.brier_lr ?? "—"})</div>
           <div>HistGB OOS AUC: <strong>${g.auc_gb ?? "—"}</strong> (Brier ${g.brier_gb ?? "—"})</div>
           <div>Baseline OOS: <strong>${g.base_oos_win_pct ?? "—"}%</strong> / <span class="${cls(g.base_oos_exp_r)}">${g.base_oos_exp_r >= 0 ? "+" : ""}${g.base_oos_exp_r ?? "—"}R</span></div>
@@ -730,10 +1276,12 @@
       </tr>`).join("");
     }
 
+    renderSessionStrip();
     loadAll(false);
     setInterval(refreshLiveSpot, 10000);
     setInterval(refreshLiveKlines, 30000);
     setInterval(() => loadAll(false), 120000);
+    setInterval(renderSessionStrip, 30000);
   </script>
 </body>
 </html>
