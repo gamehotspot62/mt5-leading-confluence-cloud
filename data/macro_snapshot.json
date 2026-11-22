@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-22T01:26:30Z",
+  "updated_utc": "2026-11-22T02:28:34Z",
   "global_bias": -14,
   "global_regime": {
     "vix": 35.89,
@@ -19,7 +19,7 @@
     "credit_hyg_tlt_20d_pct": -1.07,
     "tech_qqq_xlp_20d_pct": -15.72,
     "stablecoins": {
-      "total_usd_b": 282.45,
+      "total_usd_b": 282.44,
       "chg_7d_pct": -1.62,
       "chg_30d_pct": -6.2
     },
