@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-21T23:22:58Z",
+  "updated_utc": "2026-11-22T00:08:45Z",
   "global_bias": -14,
   "global_regime": {
     "vix": 35.89,
@@ -21,11 +21,11 @@
     "stablecoins": {
       "total_usd_b": 282.51,
       "chg_7d_pct": -1.58,
-      "chg_30d_pct": -6.32
+      "chg_30d_pct": -6.31
     },
     "fear_greed": {
-      "value": 12.0,
-      "avg7d": 11.0
+      "value": 11.0,
+      "avg7d": 11.1
     }
   },
   "symbols": {
@@ -56,8 +56,8 @@
     },
     "BTCUSD": {
       "asset_class": "crypto",
-      "bias_score": -16,
-      "note": "MVRV_Value_ExOutflow_ExtremeFearContrarian_COT3",
+      "bias_score": -31,
+      "note": "ExOutflow_ExtremeFearContrarian_COT3_ETF-24",
       "cot": {
         "ok": true,
         "report_date": "2026-11-17",
@@ -86,21 +86,18 @@
       "cot_score": -25.0,
       "etf_score": -24.2,
       "onchain": {
-        "mvrv": 1.105,
-        "mvrv_pts": 30.0,
-        "netflow7_ratio": -0.0647,
-        "netflow_pts": 11.7,
-        "ex_supply_30d_pct": 1.3,
-        "stablecoins_30d_pct": -6.32,
+        "netflow7_ratio": -0.0619,
+        "netflow_pts": 11.1,
+        "stablecoins_30d_pct": -6.31,
         "funding_8h": -0.0,
         "funding_pts": 0.0,
-        "fear_greed": 12.0
+        "fear_greed": 11.0
       }
     },
     "ETHUSD": {
       "asset_class": "crypto",
-      "bias_score": 2,
-      "note": "MVRV_Value_ExNeut_ExtremeFearContrarian_ETF-21",
+      "bias_score": -24,
+      "note": "ExNeut_ExtremeFearContrarian_ETF-21_VIXBack",
       "cot": {
         "ok": false
       },
@@ -116,15 +113,12 @@
       "cot_score": 0.0,
       "etf_score": -20.9,
       "onchain": {
-        "mvrv": 0.801,
-        "mvrv_pts": 30.0,
-        "netflow7_ratio": -0.0223,
-        "netflow_pts": 4.0,
-        "ex_supply_30d_pct": -4.13,
-        "stablecoins_30d_pct": -6.32,
+        "netflow7_ratio": 0.0028,
+        "netflow_pts": -0.5,
+        "stablecoins_30d_pct": -6.31,
         "funding_8h": 0.0,
         "funding_pts": -0.0,
-        "fear_greed": 12.0
+        "fear_greed": 11.0
       }
     },
     "XAGUSD": {
