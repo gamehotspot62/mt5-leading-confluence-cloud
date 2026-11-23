@@ -1,10 +1,10 @@
 {
-  "updated_utc": "2026-11-23T09:40:53Z",
+  "updated_utc": "2026-11-23T10:47:43Z",
   "global_bias": 4,
   "global_regime": {
-    "vix": 30.36,
+    "vix": 30.14,
     "vix3m": 30.94,
-    "vix_vix3m_ratio": 0.981,
+    "vix_vix3m_ratio": 0.974,
     "vix_state": "CONTANGO_RISK_ON",
     "hy_oas_pct": 3.52,
     "hy_oas_chg20": 0.12,
@@ -13,8 +13,8 @@
     "yield_curve_10y2y": 0.29,
     "fed_net_liq_trillion": 5.824,
     "fed_net_liq_4w_pct": 0.4,
-    "dxy": 103.75,
-    "dxy_ret20_pct": 1.76,
+    "dxy": 103.85,
+    "dxy_ret20_pct": 1.85,
     "breadth_rsp_spy_20d_pct": 5.54,
     "credit_hyg_tlt_20d_pct": -1.07,
     "tech_qqq_xlp_20d_pct": -15.72,
@@ -122,8 +122,8 @@
         "netflow_pts": -2.9,
         "ex_supply_30d_pct": -3.81,
         "stablecoins_30d_pct": -5.97,
-        "funding_8h": -9e-06,
-        "funding_pts": 0.2,
+        "funding_8h": -1.6e-05,
+        "funding_pts": 0.3,
         "fear_greed": 11.0
       }
     },
@@ -154,7 +154,7 @@
     },
     "USOIL": {
       "asset_class": "energy",
-      "bias_score": 7,
+      "bias_score": 6,
       "note": "COT99_ETF-6_VIXCont",
       "cot": {
         "ok": true,
@@ -179,7 +179,7 @@
     },
     "EURUSD": {
       "asset_class": "fx",
-      "bias_score": -14,
+      "bias_score": -15,
       "note": "COT1_ETF-21_VIXCont",
       "cot": {
         "ok": true,
@@ -204,7 +204,7 @@
     },
     "GBPUSD": {
       "asset_class": "fx",
-      "bias_score": -12,
+      "bias_score": -13,
       "note": "COT22_ETF-23_VIXCont",
       "cot": {
         "ok": true,
