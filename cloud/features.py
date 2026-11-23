@@ -52,8 +52,8 @@ class EngineParams:
     ker_period: int = 14
     pivot_left: int = 5
     pivot_right: int = 3
-    cooldown_bars: int = 6
-    allow_consecutive: bool = False
+    cooldown_bars: int = 4
+    allow_consecutive: bool = True
     en_sweep: bool = True
     en_squeeze: bool = True
     en_pullback: bool = True
@@ -429,8 +429,13 @@ def compute_indicators_and_candidates(
             if trend_sup and touched and held and conf_c and ofi[i] >= 0.20 and rvol[i] >= 1.00 and z <= 1.8:
                 trig_b_pl = True
 
-        # Standalone Sweep allowed only when HTF is balanced (0), OR in confluence with SqzBreak/VWAPPull
-        trig_b_sw = raw_b_sw and (not params.use_htf or htf_b == 0 or trig_b_sq or trig_b_pl)
+        # Standalone Sweep allowed only when HTF is balanced (0) AND institutional QualitySweep (risk>=1.45 ATR & body<=0.90 ATR),
+        # OR in confluence with SqzBreak/VWAPPull
+        body_atr_i = abs(body) / max(at, 1e-9)
+        b_sw_raw_risk = abs(c[i] - (b_sw_ext - params.sl_buffer_atr * at))
+        b_sw_risk_atr = max(params.min_sl_atr, min(params.max_sl_atr, b_sw_raw_risk / max(at, 1e-9)))
+        b_qual_sw = (b_sw_risk_atr >= 1.45) and (body_atr_i <= 0.90)
+        trig_b_sw = raw_b_sw and (trig_b_sq or trig_b_pl or ((not params.use_htf or htf_b == 0) and b_qual_sw))
         b_exts = []
         if trig_b_sw:
             b_exts.append(b_sw_ext)
@@ -439,7 +444,7 @@ def compute_indicators_and_candidates(
         if b_exts:
             b_ext = min(b_exts)
 
-        # Bearish Playbooks (Regime-Matched v3.0 Routing)
+        # Bearish Playbooks (Regime-Matched v3.6 Routing)
         raw_s_sw = False
         s_sw_ext = h[i]
         trig_s_sq = False
@@ -490,7 +495,10 @@ def compute_indicators_and_candidates(
             if trend_sup and touched and held and conf_c and ofi[i] <= -0.20 and rvol[i] >= 1.00 and z >= -1.8:
                 trig_s_pl = True
 
-        trig_s_sw = raw_s_sw and (not params.use_htf or htf_b == 0 or trig_s_sq or trig_s_pl)
+        s_sw_raw_risk = abs((s_sw_ext + params.sl_buffer_atr * at) - c[i])
+        s_sw_risk_atr = max(params.min_sl_atr, min(params.max_sl_atr, s_sw_raw_risk / max(at, 1e-9)))
+        s_qual_sw = (s_sw_risk_atr >= 1.45) and (body_atr_i <= 0.90)
+        trig_s_sw = raw_s_sw and (trig_s_sq or trig_s_pl or ((not params.use_htf or htf_b == 0) and s_qual_sw))
         s_exts = []
         if trig_s_sw:
             s_exts.append(s_sw_ext)

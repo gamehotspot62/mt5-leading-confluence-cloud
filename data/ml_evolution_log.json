@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-23T18:55:17Z",
+  "updated_utc": "2026-11-23T20:11:47Z",
   "history": [
     {
       "updated_utc": "2026-11-23T18:55:17Z",
@@ -16,6 +16,24 @@
       "ml_eval_folds": 5,
       "ml_min_prob": 0.718,
       "decision": "PROMOTED_V35_UPGRADE",
+      "promoted": true,
+      "drift_triggered": false
+    },
+    {
+      "updated_utc": "2026-11-23T20:11:47Z",
+      "window_days": 365,
+      "samples_1y": 1889,
+      "live_feedback_used": 0,
+      "auc_lr": 0.4802,
+      "base_oos_win_pct": 70.0,
+      "ml_oos_win_pct": 70.1,
+      "ml_oos_exp_r": 0.0155,
+      "ml_oos_pf": 1.05,
+      "ml_oos_trades": 1232,
+      "ml_pos_folds": 3,
+      "ml_eval_folds": 5,
+      "ml_min_prob": 0.638,
+      "decision": "PROMOTED_V36_FREQ_UPGRADE",
       "promoted": true,
       "drift_triggered": false
     }

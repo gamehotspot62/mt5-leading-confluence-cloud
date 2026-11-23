@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LeadingConfluencePro v3.5 — Self-Evolving Cloud Quant &amp; High-Win-Rate ML</title>
+  <title>LeadingConfluencePro v3.6 — Self-Evolving Cloud Quant &amp; High-Win-Rate ML</title>
   <style>
     :root {
       --bg: #0b0f17;
@@ -71,6 +71,7 @@
     .pill-bull { background: rgba(46,229,157,0.14); color: var(--green); }
     .pill-bear { background: rgba(255,92,114,0.14); color: var(--red); }
     .pill-warn { background: rgba(245,185,66,0.14); color: var(--gold); }
+    .pill-info { background: rgba(78,168,255,0.14); color: var(--blue); }
     table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
     th, td { padding: 9px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
     th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; }
@@ -97,7 +98,7 @@
   <div class="container">
     <header>
       <div>
-        <h1>LeadingConfluencePro v3.5 — 1-Year Self-Evolving ML &amp; Cloud Quant</h1>
+        <h1>LeadingConfluencePro v3.6 — 1-Year Self-Evolving ML &amp; Cloud Quant</h1>
         <div class="subtitle" id="timestamps">Loading cloud telemetry...</div>
         <div id="sessionStrip" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;font-size:0.75rem;"></div>
       </div>
@@ -278,8 +279,8 @@
 
     function signalGrade(score, mlProb, mlThresh, direction, macroBias) {
       const macroAligned = (direction === "BUY" && macroBias >= 15) || (direction === "SELL" && macroBias <= -15);
-      if (score >= 80 && (mlProb == null || mlProb >= mlThresh + 0.05) && macroAligned) return "A+";
-      if (score >= 72 && (mlProb == null || mlProb >= mlThresh + 0.02)) return "A";
+      if (score >= 76 && (mlProb == null || mlProb >= mlThresh + 0.035) && macroAligned) return "A+";
+      if (score >= 72 && (mlProb == null || mlProb >= mlThresh + 0.015)) return "A";
       return "B";
     }
 
@@ -367,7 +368,7 @@
       const mlThresh = Number(cfg?.ML_MIN_PROB) || Number(mlModel?.ml_min_prob) || 0.65;
 
       const atrPeriod = 14, volPeriod = 20, sqzPeriod = 20, kerPeriod = 14, bbMult = 2.0, kcMult = 1.5;
-      const pivotLeft = 5, pivotRight = 3, minSqzBars = 4, cooldownBars = 6;
+      const pivotLeft = 5, pivotRight = 3, minSqzBars = 4, cooldownBars = 4;
       const alphaFast = 2.0 / (sqzPeriod + 1.0);
       const alphaSlow = 2.0 / 51.0;
 
@@ -604,7 +605,11 @@
             trigBPl = true;
           }
         }
-        const trigBSw = rawBSw && (htfB === 0 || trigBSq || trigBPl);
+        const bodyAtrI = Math.abs(body) / Math.max(at, 1e-9);
+        const bSwRawRisk = Math.abs(bi.c - (bSwExt - slBufAtr * at));
+        const bSwRiskAtr = Math.max(1.10, Math.min(2.50, bSwRawRisk / Math.max(at, 1e-9)));
+        const bQualSw = (bSwRiskAtr >= 1.45 && bodyAtrI <= 0.90);
+        const trigBSw = rawBSw && (trigBSq || trigBPl || (htfB === 0 && bQualSw));
         if (trigBSw) {
           bExt = bSwExt;
           if (trigBSq || trigBPl) bExt = Math.min(bExt, Math.min(bi.l, bars[i - 1].l));
@@ -638,7 +643,10 @@
             trigSPl = true;
           }
         }
-        const trigSSw = rawSSw && (htfB === 0 || trigSSq || trigSPl);
+        const sSwRawRisk = Math.abs((sSwExt + slBufAtr * at) - bi.c);
+        const sSwRiskAtr = Math.max(1.10, Math.min(2.50, sSwRawRisk / Math.max(at, 1e-9)));
+        const sQualSw = (sSwRiskAtr >= 1.45 && bodyAtrI <= 0.90);
+        const trigSSw = rawSSw && (trigSSq || trigSPl || (htfB === 0 && sQualSw));
         if (trigSSw) {
           sExt = sSwExt;
           if (trigSSq || trigSPl) sExt = Math.max(sExt, Math.max(bi.h, bars[i - 1].h));
@@ -692,8 +700,8 @@
           sScore = Math.max(0, Math.min(100, sScore));
         }
 
-        const bOk = (bScore >= minScore) && ((lastSigDir !== 1) || (buyReset === 1));
-        const sOk = (sScore >= minScore) && ((lastSigDir !== -1) || (sellReset === 1));
+        const bOk = (bScore >= minScore);
+        const sOk = (sScore >= minScore);
         let finalDir = 0;
         if (bOk && !sOk) finalDir = 1;
         else if (sOk && !bOk) finalDir = -1;
@@ -1318,6 +1326,7 @@
       const foldsTxt = (g.ml_pos_folds != null && g.ml_eval_folds != null) ? `${g.ml_pos_folds}/${g.ml_eval_folds} folds` : "—";
       const mlPfTxt = g.ml_oos_pf != null ? `PF ${fmt(g.ml_oos_pf, 2)}` : "PF —";
       const gateTxt = g.ml_min_prob ? Number((g.ml_min_prob * 100).toFixed(1)) + "%" : "—";
+      const keptTxt = g.kept_fraction != null ? `${Math.round(g.kept_fraction * 100)}% kept` : "—";
       sumEl.innerHTML = `
         <div style="margin-bottom:10px;padding:8px 12px;border-radius:8px;background:#0f1520;border:1px solid var(--border);font-size:0.81rem;">
           <strong>Window:</strong> Rolling ${ml.training_window_days ?? 365}d (${ml.time_decay_half_life_days ?? 120}d half-life) &bull;
@@ -1325,9 +1334,9 @@
         </div>
         <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:0.85rem;">
           <div>ML-Filtered OOS: <strong class="${mlWinCls}">${g.ml_oos_win_pct ?? "—"}% Win</strong> / <span class="${cls(g.ml_oos_exp_r)}">${g.ml_oos_exp_r >= 0 ? "+" : ""}${fmt(g.ml_oos_exp_r,4)}R</span> (${mlPfTxt}, ${foldsTxt})</div>
-          <div>ML Samples / Gate: <strong>${g.samples ?? "—"}</strong> (Gate &ge;${gateTxt}, ${g.ml_oos_trades ?? "—"} OOS trades)</div>
+          <div>ML Samples / Gate: <strong>${g.samples ?? "—"}</strong> (Gate &ge;${gateTxt}, ${keptTxt}, ${g.ml_oos_trades ?? "—"} OOS)</div>
           <div>Intraday Base OOS: <strong>${g.base_oos_win_pct ?? "—"}% Win</strong> / <span class="${cls(g.base_oos_exp_r)}">${g.base_oos_exp_r >= 0 ? "+" : ""}${g.base_oos_exp_r ?? "—"}R</span> &bull; AUC <strong>${g.auc_lr ?? "—"}</strong></div>
-          <div>WF Active / Def: <strong class="pos">${wf.wf_optimized_count ?? "—"}</strong> / <span class="neu">${wf.defensive_filter_count ?? "—"}</span> &bull; Live Feedback: <strong>${g.live_feedback_used ?? ml.live_feedback_count ?? 0}</strong></div>
+          <div>WF / Adapt / Def: <strong class="pos">${wf.wf_optimized_count ?? "—"}</strong> / <strong style="color:var(--blue)">${wf.adaptive_ml_gate_count ?? 0}</strong> / <span class="neu">${wf.defensive_filter_count ?? "—"}</span> &bull; Live: <strong>${g.live_feedback_used ?? ml.live_feedback_count ?? 0}</strong></div>
         </div>`;
 
       const pbs = ml.playbook_oos_stats || {};
@@ -1361,7 +1370,7 @@
       const cfgs = ml.optimized_configs || [];
       cfgEl.innerHTML = cfgs.map(c => {
         const pbsTxt = `${c.EN_SWEEP ? "Sw" : "—"}/${c.EN_SQUEEZE ? "Sq" : "—"}/${c.EN_PULLBACK ? "Pl" : "—"}`;
-        const stCls = c.STATUS === "WF_OPTIMIZED" ? "pill-bull" : (c.STATUS === "DEFENSIVE_FILTER" ? "pill-warn" : "");
+        const stCls = c.STATUS === "WF_OPTIMIZED" ? "pill-bull" : (c.STATUS === "ADAPTIVE_ML_GATE" ? "pill-info" : (c.STATUS === "DEFENSIVE_FILTER" ? "pill-warn" : ""));
         return `<tr>
           <td><strong>${c.SYMBOL}</strong></td>
           <td>${c.TIMEFRAME}</td>

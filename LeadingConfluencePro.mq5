@@ -7,8 +7,8 @@
 //+------------------------------------------------------------------+
 #property copyright "LeadingConfluencePro Quantitative Architecture"
 #property link      "https://github.com/gamehotspot62/mt5-leading-confluence-cloud"
-#property version   "3.50"
-#property description "Universal non-repainting leading confluence indicator v3.50:"
+#property version   "3.60"
+#property description "Universal non-repainting leading confluence indicator v3.60:"
 #property description "1) BVC + CLV Order Flow Delta & CVD Divergence (microstructure)"
 #property description "2) Wyckoff Liquidity Sweep / SFP Reversal (behavioral stop hunts)"
 #property description "3) Bollinger-Keltner Volatility Squeeze & OLS Momentum"
@@ -77,12 +77,20 @@ enum ENUM_VOL_SOURCE
    VOL_REAL = 2  // Force Real Volume
 };
 
+enum ENUM_SIGNAL_PROFILE
+{
+   PROFILE_BALANCED_PRO = 0, // Balanced Pro (Cloud ML Gate: ~70%+ Win, Good Signal Count)
+   PROFILE_ACTIVE_HIGH  = 1, // Active High Count (Relaxed ML -4%: Max Chart History)
+   PROFILE_SNIPER_APLUS = 2  // Sniper A+ Only (Strict ML +3.5%: Highest Precision)
+};
+
 //--- Input Parameters
 input group "=== 1. Confluence & Signal Confirmation ==="
+input ENUM_SIGNAL_PROFILE InpSignalProfile         = PROFILE_BALANCED_PRO; // Chart Signal Profile (Pro / Active / Sniper)
 input ENUM_STRICTNESS InpStrictnessMode           = MODE_BALANCED; // Signal Strictness Preset (Manual Fallback)
 input int             InpCustomMinScore           = 68;            // Custom Min Score (0-100, used if MODE_CUSTOM)
-input int             InpMinBarsBetweenSignals    = 6;             // Minimum Cooldown Bars Between Signals
-input bool            InpAllowConsecutiveSameDir  = false;         // Allow Same-Direction Signals Without VWAP Reset
+input int             InpMinBarsBetweenSignals    = 4;             // Minimum Cooldown Bars Between Signals
+input bool            InpAllowConsecutiveSameDir  = true;          // Allow Same-Direction Signals Without VWAP Reset
 input bool            InpEnableSweepPlaybook      = true;          // Enable Playbook 1: Liquidity Sweep / SFP
 input bool            InpEnableSqueezePlaybook    = true;          // Enable Playbook 2: Volatility Squeeze Breakout
 input bool            InpEnableVWAPPullbackPlaybook = true;        // Enable Playbook 3: VWAP Pullback Continuation
@@ -131,7 +139,7 @@ input bool            InpShowDashboard            = true;          // Show On-Ch
 input ENUM_BASE_CORNER InpDashCorner              = CORNER_LEFT_UPPER; // Dashboard Corner
 input int             InpDashX                    = 14;            // Dashboard X Offset (Pixels)
 input int             InpDashY                    = 24;            // Dashboard Y Offset (Pixels)
-input int             InpMaxHistoryBars           = 3000;          // Max History Bars to Process (0 = All Bars)
+input int             InpMaxHistoryBars           = 5000;          // Max History Bars to Process (0 = All Bars)
 input bool            InpEnableAlert              = true;          // Popup Terminal Alert on Confirmed Closed Bar
 input bool            InpEnablePush               = false;         // Mobile Push Notification
 input bool            InpEnableEmail              = false;         // Email Notification
@@ -236,6 +244,20 @@ int             g_lastVisualMacroBias  = 999999;
 #define PB_SQUEEZE      2
 #define PB_VWAP_PULL    3
 #define PB_MULTI        4
+
+double GetProfileMLOffset()
+{
+   if(InpSignalProfile == PROFILE_ACTIVE_HIGH)  return -0.040;
+   if(InpSignalProfile == PROFILE_SNIPER_APLUS) return  0.035;
+   return 0.0;
+}
+
+string GetProfileName()
+{
+   if(InpSignalProfile == PROFILE_ACTIVE_HIGH)  return "Active";
+   if(InpSignalProfile == PROFILE_SNIPER_APLUS) return "Sniper";
+   return "Pro";
+}
 
 //+------------------------------------------------------------------+
 //| Helper: Standard Normal CDF (Abramowitz & Stegun 7.1.26)         |
@@ -1284,7 +1306,7 @@ void UpdateVisualsAndStats(const int rates_total,
    // Row 1: Title
    string tfName = EnumToString(_Period);
    StringReplace(tfName, "PERIOD_", "");
-   string titleStr = StringFormat("LEADING CONFLUENCE PRO v3.50 [%s %s] | 1Y Auto-ML (TP1 65%%+rSL-0.5R)", _Symbol, tfName);
+   string titleStr = StringFormat("LEADING CONFLUENCE PRO v3.60 [%s %s] | 1Y Auto-ML [%s] (TP1 65%%+rSL-0.5R)", _Symbol, tfName, GetProfileName());
    SetDashLabel(g_prefix + "R1", titleStr, xTxt, yTxt, clrWhite, 9);
    yTxt += dy;
 
@@ -1311,6 +1333,7 @@ void UpdateVisualsAndStats(const int rates_total,
    // Row 3: Cloud ML + ATR Percentile + FVG/Displacement Status
    bool cloudSvcOk = (GlobalVariableCheck("LCP_CLOUD_STATUS") && GlobalVariableGet("LCP_CLOUD_STATUS") > 0.5);
    string svcTxt   = cloudSvcOk ? "SYNCED" : ((g_cloudConfigLoaded || g_mlLoaded) ? "LOCAL_CSV" : "DEFAULT");
+   double effMLGateHUD = MathMax(0.30, MathMin(0.92, g_effMLMinProb + GetProfileMLOffset()));
    string mlTxt    = "OFF";
    if(g_mlLoaded && lastClosed >= g_calcStart + 2)
    {
@@ -1328,11 +1351,11 @@ void UpdateVisualsAndStats(const int rates_total,
       double isLonLC = IsLondonNYSessionUTC(time[lastClosed]);
       double pBuyLC  = EvaluateMLWinProb18(1,  g_ofi[lastClosed], nd3LC, g_rvol[lastClosed], g_vwapZ[lastClosed], RegimeBuffer[lastClosed], g_htfBias[lastClosed], clvLC, g_atrPct[lastClosed], bFvgLC, g_cachedMacroBias,  distLC, InpMinSLATR, bodyLC, 0.70, isH1LC, isLonLC, 0.0, 0.0);
       double pSellLC = EvaluateMLWinProb18(-1, g_ofi[lastClosed], nd3LC, g_rvol[lastClosed], g_vwapZ[lastClosed], RegimeBuffer[lastClosed], g_htfBias[lastClosed], clvLC, g_atrPct[lastClosed], sFvgLC, g_cachedMacroBias, -distLC, InpMinSLATR, bodyLC, 0.70, isH1LC, isLonLC, 0.0, 0.0);
-      mlTxt = StringFormat("ON(%s:%df >=%.1f%% | B:%.0f%% S:%.0f%%)", g_mlModelSym, g_mlFeatCount, g_effMLMinProb * 100.0, pBuyLC * 100.0, pSellLC * 100.0);
+      mlTxt = StringFormat("ON(%s:%df >=%.1f%% | B:%.0f%% S:%.0f%%)", g_mlModelSym, g_mlFeatCount, effMLGateHUD * 100.0, pBuyLC * 100.0, pSellLC * 100.0);
    }
    else if(g_mlLoaded)
    {
-      mlTxt = StringFormat("ON(%s:%df >=%.1f%%)", g_mlModelSym, g_mlFeatCount, g_effMLMinProb * 100.0);
+      mlTxt = StringFormat("ON(%s:%df >=%.1f%%)", g_mlModelSym, g_mlFeatCount, effMLGateHUD * 100.0);
    }
    string fvgTxt   = (g_fvgDispState[lastClosed] > 0) ? "BULL" : ((g_fvgDispState[lastClosed] < 0) ? "BEAR" : "NONE");
    color cloudClr  = (g_mlLoaded || cloudSvcOk) ? clrAqua : clrSilver;
@@ -1476,7 +1499,7 @@ int OnInit()
 
    IndicatorSetInteger(INDICATOR_DIGITS, _Digits);
    IndicatorSetString(INDICATOR_SHORTNAME,
-                      StringFormat("LeadingConfluencePro v3.5 (%d+)", g_effMinScore));
+                      StringFormat("LeadingConfluencePro v3.6 (%d+)", g_effMinScore));
 
    return INIT_SUCCEEDED;
 }
@@ -2034,8 +2057,13 @@ int OnCalculate(const int rates_total,
          }
       }
 
-      // Standalone Sweep in balanced HTF (0), or confluence Sweep + Sqz/Pullback with HTF (+1)
-      trigBullSweep = rawBullSweep && (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == 0 || trigBullSqz || trigBullPull);
+      // Standalone Sweep allowed in balanced HTF (0) ONLY when institutional QualitySweep (risk>=1.45 ATR & body<=0.90 ATR),
+      // OR in confluence with SqzBreak/VWAPPull
+      double barBodyAtr = MathAbs(bodyOpenClose) / MathMax(atr, _Point);
+      double bSwRawRisk = MathAbs(close[i] - (bullSweepExt - g_effSLBufferATR * atr));
+      double bSwRiskAtr = MathMax(InpMinSLATR, MathMin(InpMaxSLATR, bSwRawRisk / MathMax(atr, _Point)));
+      bool   bullQualSw = (bSwRiskAtr >= 1.45 && barBodyAtr <= 0.90);
+      trigBullSweep = rawBullSweep && (trigBullSqz || trigBullPull || ((!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == 0) && bullQualSw));
       if(trigBullSweep)
       {
          bullStructExtreme = bullSweepExt;
@@ -2047,7 +2075,7 @@ int OnCalculate(const int rates_total,
          bullStructExtreme = MathMin(low[i], low[i - 1]);
       }
 
-      //--- Check Playbooks (Bearish — v3.0 Regime-Matched Routing)
+      //--- Check Playbooks (Bearish — v3.6 Regime-Matched Routing)
       bool   rawBearSweep  = false;
       double bearSweepExt  = high[i];
       bool   trigBearSweep = false;
@@ -2110,7 +2138,10 @@ int OnCalculate(const int rates_total,
          }
       }
 
-      trigBearSweep = rawBearSweep && (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == 0 || trigBearSqz || trigBearPull);
+      double sSwRawRisk = MathAbs((bearSweepExt + g_effSLBufferATR * atr) - close[i]);
+      double sSwRiskAtr = MathMax(InpMinSLATR, MathMin(InpMaxSLATR, sSwRawRisk / MathMax(atr, _Point)));
+      bool   bearQualSw = (sSwRiskAtr >= 1.45 && barBodyAtr <= 0.90);
+      trigBearSweep = rawBearSweep && (trigBearSqz || trigBearPull || ((!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == 0) && bearQualSw));
       if(trigBearSweep)
       {
          bearStructExtreme = bearSweepExt;
@@ -2273,13 +2304,14 @@ int OnCalculate(const int rates_total,
 
       double bullProb = 0.0;
       double bearProb = 0.0;
+      double effMLGate = MathMax(0.30, MathMin(0.92, g_effMLMinProb + GetProfileMLOffset()));
       if(buyValid && InpUseCloudMLFilter && g_mlLoaded)
       {
          double bRiskAtr = bullRisk / MathMax(atr, _Point);
          double bIsMulti = (bullPB == PB_MULTI) ? 1.0 : 0.0;
          double bIsPull  = (bullPB == PB_VWAP_PULL) ? 1.0 : 0.0;
          bullProb = EvaluateMLWinProb18(1, g_ofi[i], netDelta3, g_rvol[i], z, ker, htfBias, clv, g_atrPct[i], bullFvgDisp, g_cachedMacroBias, distVwapAtr, bRiskAtr, bodyAtr, (double)bullScore / 100.0, isH1OrHigh, isLonNY, bIsMulti, bIsPull);
-         if(bullProb < g_effMLMinProb)
+         if(bullProb < effMLGate)
             buyValid = false;
       }
       if(sellValid && InpUseCloudMLFilter && g_mlLoaded)
@@ -2288,7 +2320,7 @@ int OnCalculate(const int rates_total,
          double sIsMulti = (bearPB == PB_MULTI) ? 1.0 : 0.0;
          double sIsPull  = (bearPB == PB_VWAP_PULL) ? 1.0 : 0.0;
          bearProb = EvaluateMLWinProb18(-1, g_ofi[i], netDelta3, g_rvol[i], z, ker, htfBias, clv, g_atrPct[i], bearFvgDisp, g_cachedMacroBias, -distVwapAtr, sRiskAtr, bodyAtr, (double)bearScore / 100.0, isH1OrHigh, isLonNY, sIsMulti, sIsPull);
-         if(bearProb < g_effMLMinProb)
+         if(bearProb < effMLGate)
             sellValid = false;
       }
 

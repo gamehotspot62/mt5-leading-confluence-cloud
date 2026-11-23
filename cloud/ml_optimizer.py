@@ -412,6 +412,8 @@ def optimize_symbol_timeframe(
                 min_score=int(cfg["min_score"]),
                 vwap_period=int(cfg["vwap_period"]),
                 sl_buffer_atr=float(cfg["sl_buffer_atr"]),
+                cooldown_bars=4,
+                allow_consecutive=True,
                 min_sl_atr=1.10,
                 tp1_mult=0.50,
                 tp2_mult=3.00,
@@ -492,6 +494,8 @@ def optimize_symbol_timeframe(
         min_score=58,
         vwap_period=int(prod_cfg["vwap_period"]),
         sl_buffer_atr=float(prod_cfg["sl_buffer_atr"]),
+        cooldown_bars=4,
+        allow_consecutive=True,
         min_sl_atr=1.10,
         tp1_mult=0.50,
         tp2_mult=3.00,
@@ -528,11 +532,30 @@ def optimize_symbol_timeframe(
             "OOS_TRADES": oos_trades,
             "STATUS": "WF_OPTIMIZED",
         }
+    elif oos_exp_r > -0.10:
+        row = {
+            "SYMBOL": sym,
+            "TIMEFRAME": tf_label,
+            "MIN_SCORE": 64,
+            "VWAP_PERIOD": 50,
+            "SL_BUFFER_ATR": 0.25,
+            "TP1_MULT": 0.50,
+            "TP2_MULT": 3.00,
+            "EN_SWEEP": 1,
+            "EN_SQUEEZE": 1,
+            "EN_PULLBACK": 1,
+            "OOS_WIN_PCT": oos_win_pct,
+            "OOS_EXP_R": oos_exp_r,
+            "OOS_PF": oos_pf,
+            "OOS_MAX_DD_R": oos_max_dd,
+            "OOS_TRADES": oos_trades,
+            "STATUS": "ADAPTIVE_ML_GATE",
+        }
     else:
         row = {
             "SYMBOL": sym,
             "TIMEFRAME": tf_label,
-            "MIN_SCORE": 76,
+            "MIN_SCORE": 68,
             "VWAP_PERIOD": 50,
             "SL_BUFFER_ATR": 0.25,
             "TP1_MULT": 0.50,
@@ -798,12 +821,13 @@ def _train_purged_cv_models(events_df: pd.DataFrame, min_kept_count: int = 40) -
     base_gp = float(np.sum(r_v[r_v > 0.0]))
     base_gl = float(abs(np.sum(r_v[r_v < 0.0])))
 
-    # Strictly causal inner-fold quantile thresholding (zero test-set leakage)
-    q_grid = [0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75, 0.80, 0.82, 0.85, 0.88]
+    # Strictly causal inner-fold high-retention quantile thresholding (keep ~40%-95% signals)
+    q_grid = [0.05, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60]
     eff_min_kept = min(min_kept_count, max(12, int(0.12 * len(y_v))))
 
     tier1_best: Optional[Tuple[float, Dict[str, Any]]] = None
     tier2_best: Optional[Tuple[float, Dict[str, Any]]] = None
+    fallback_best: Optional[Tuple[Tuple[float, float], Dict[str, Any]]] = None
 
     for q in q_grid:
         causal_mask = np.zeros(len(df_ev), dtype=bool)
@@ -842,16 +866,19 @@ def _train_purged_cv_models(events_df: pd.DataFrame, min_kept_count: int = 40) -
             "pos_folds": pos_folds,
             "eval_folds": eval_folds,
         }
+        fb_key = (exp_q, win_q)
+        if fallback_best is None or fb_key > fallback_best[0]:
+            fallback_best = (fb_key, cand_info)
         if win_q >= TARGET_WIN_PCT and exp_q > 0.0:
-            obj1 = exp_q * math.sqrt(min(n_kept, 250)) + 0.02 * pos_folds
+            obj1 = exp_q * math.sqrt(min(n_kept, 600)) + 0.03 * pos_folds
             if tier1_best is None or obj1 > tier1_best[0]:
                 tier1_best = (obj1, cand_info)
         elif exp_q > base_exp:
-            obj2 = exp_q * math.sqrt(min(n_kept, 250)) + 0.005 * win_q
+            obj2 = exp_q * math.sqrt(min(n_kept, 600)) + 0.005 * win_q
             if tier2_best is None or obj2 > tier2_best[0]:
                 tier2_best = (obj2, cand_info)
 
-    chosen = tier1_best[1] if tier1_best is not None else (tier2_best[1] if tier2_best is not None else None)
+    chosen = tier1_best[1] if tier1_best is not None else (tier2_best[1] if tier2_best is not None else (fallback_best[1] if fallback_best is not None else None))
     if chosen is not None:
         best_q = float(chosen["q"])
         best_win = float(chosen["win_pct"])
@@ -862,14 +889,19 @@ def _train_purged_cv_models(events_df: pd.DataFrame, min_kept_count: int = 40) -
         best_pos_folds = int(chosen["pos_folds"])
         best_eval_folds = int(chosen["eval_folds"])
     else:
-        best_q = 0.20
+        best_q = 0.05
         best_win = base_win
         best_exp = base_exp
         best_pf = min(9.99, base_gp / max(base_gl, 1e-6)) if base_gp > 0.0 else 0.0
         best_kept_cnt = int(len(y_v))
         best_kept = 1.0
         best_pos_folds = 0
-        best_eval_folds = len(best_fold_preds)
+        best_eval_folds = 0
+        for _, te_idx, _, _ in best_fold_preds:
+            if len(te_idx) >= 5:
+                best_eval_folds += 1
+                if float(np.mean(r_net[te_idx])) > 0.0:
+                    best_pos_folds += 1
 
     # Fit final production StandardScaler + LogisticRegression on full 1-year (+ live feedback) pool
     final_scaler = StandardScaler()
@@ -878,6 +910,7 @@ def _train_purged_cv_models(events_df: pd.DataFrame, min_kept_count: int = 40) -
     final_lr.fit(X_full_s, y, sample_weight=sample_w)
     p_full = final_lr.predict_proba(X_full_s)[:, 1]
     best_thresh = round(float(np.clip(np.quantile(p_full, best_q), 0.35, 0.90)), 3)
+    prime_thresh = round(float(np.clip(np.quantile(p_full, 0.72), 0.40, 0.92)), 3)
 
     return {
         "ok": True,
@@ -899,6 +932,7 @@ def _train_purged_cv_models(events_df: pd.DataFrame, min_kept_count: int = 40) -
         "ml_pos_folds": best_pos_folds,
         "ml_eval_folds": best_eval_folds,
         "ml_min_prob": best_thresh,
+        "ml_prime_prob": prime_thresh,
         "kept_fraction": round(best_kept, 3),
         "p_min": round(float(np.min(p_full)), 3),
         "p_max": round(float(np.max(p_full)), 3),
@@ -1133,19 +1167,23 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
             prev_report = None
 
     drift_info = _check_live_drift()
-    prev_is_v35 = bool(prev_report and len(prev_report.get("feature_names", [])) == n_feats)
+    prev_is_current = bool(
+        prev_report
+        and prev_report.get("version") == "3.6"
+        and len(prev_report.get("feature_names", [])) == n_feats
+    )
     new_win = float(global_model.get("ml_oos_win_pct", 0.0))
     new_exp = float(global_model.get("ml_oos_exp_r", 0.0))
     new_cnt = int(global_model.get("ml_oos_trades", 0))
     new_score = new_exp * math.sqrt(max(1, new_cnt)) + 0.01 * (new_win - 65.0)
 
     promoted = True
-    evolution_status = "PROMOTED_V35_UPGRADE"
+    evolution_status = "PROMOTED_V36_FREQ_UPGRADE"
     champ_exp = None
     champ_win = None
     champ_age_days = None
 
-    if prev_is_v35 and prev_report is not None:
+    if prev_is_current and prev_report is not None:
         pg = prev_report.get("global_model", {})
         champ_exp = float(pg.get("ml_oos_exp_r", 0.0))
         champ_win = float(pg.get("ml_oos_win_pct", 0.0))
@@ -1173,7 +1211,7 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
             evolution_status = "KEPT_CHAMPION_GUARD"
 
     # Respect Champion guard: if kept Champion, preserve prior 18-feature model weights
-    if not promoted and prev_is_v35 and prev_report is not None and isinstance(prev_report.get("ml_models"), dict):
+    if not promoted and prev_is_current and prev_report is not None and isinstance(prev_report.get("ml_models"), dict):
         kept_models = prev_report["ml_models"]
         ml_rows = []
         for k_sym in ["GLOBAL"] + list(WATCHLIST.keys()):
@@ -1192,6 +1230,7 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
     # Compute Walk-Forward Portfolio Audit Summary & Per-Playbook Breakdown
     intra_cfgs = [r for r in opt_rows if r["TIMEFRAME"] in ("M15", "H1") and r.get("OOS_TRADES", 0) > 0]
     wf_opt_cnt = sum(1 for r in intra_cfgs if r["STATUS"] == "WF_OPTIMIZED")
+    adap_cnt = sum(1 for r in intra_cfgs if r["STATUS"] == "ADAPTIVE_ML_GATE")
     def_cnt = sum(1 for r in intra_cfgs if r["STATUS"] == "DEFENSIVE_FILTER")
     tot_intra_trades = sum(int(r.get("OOS_TRADES", 0)) for r in intra_cfgs)
     avg_intra_win = round(float(np.mean([r["OOS_WIN_PCT"] for r in intra_cfgs])), 1) if intra_cfgs else 0.0
@@ -1199,10 +1238,11 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
     avg_intra_pf = round(float(np.mean([r.get("OOS_PF", 1.0) for r in intra_cfgs])), 2) if intra_cfgs else 0.0
 
     wf_summary = {
-        "v35_protected_runner": True,
+        "v36_high_retention_pro": True,
         "training_window_days": WINDOW_DAYS,
         "intraday_configs_total": len(intra_cfgs),
         "wf_optimized_count": wf_opt_cnt,
+        "adaptive_ml_gate_count": adap_cnt,
         "defensive_filter_count": def_cnt,
         "intraday_oos_trades": tot_intra_trades,
         "intraday_avg_win_pct": avg_intra_win,
@@ -1249,7 +1289,7 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
 
     # Export data/OptimizedConfig.csv
     cfg_lines = [
-        f"# LeadingConfluencePro v3.5 1-Year Self-Evolving Walk-Forward Config | Updated UTC: {now_iso}",
+        f"# LeadingConfluencePro v3.6 1-Year Self-Evolving Walk-Forward Config | Updated UTC: {now_iso}",
         "SYMBOL,TIMEFRAME,MIN_SCORE,VWAP_PERIOD,SL_BUFFER_ATR,TP1_MULT,TP2_MULT,EN_SWEEP,EN_SQUEEZE,EN_PULLBACK,ML_MIN_PROB,OOS_WIN_PCT,OOS_EXP_R,STATUS",
     ]
     for r in opt_rows:
@@ -1271,7 +1311,7 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
         + ",".join(f"W{k}" for k in range(n_feats))
     )
     ml_lines = [
-        f"# LeadingConfluencePro v3.5 1-Year Self-Evolving Purged Walk-Forward ML Weights | Updated UTC: {now_iso}",
+        f"# LeadingConfluencePro v3.6 1-Year Self-Evolving Purged Walk-Forward ML Weights | Updated UTC: {now_iso}",
         ml_header,
     ] + ml_rows
     (DATA_DIR / "MLModelWeights.csv").write_text("\n".join(ml_lines) + "\n", encoding="utf-8")
@@ -1294,7 +1334,7 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
         for i in range(n_feats)
     }
     report = {
-        "version": "3.5",
+        "version": "3.6",
         "updated_utc": now_iso,
         "training_window_days": WINDOW_DAYS,
         "time_decay_half_life_days": TIME_DECAY_HALF_LIFE_DAYS,

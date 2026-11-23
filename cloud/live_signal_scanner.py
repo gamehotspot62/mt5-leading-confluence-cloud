@@ -146,9 +146,9 @@ def _signal_grade(
     macro_bias: int,
 ) -> str:
     macro_aligned = (direction == "BUY" and macro_bias >= 15) or (direction == "SELL" and macro_bias <= -15)
-    if score >= 80 and (ml_prob is None or ml_prob >= ml_thresh + 0.05) and macro_aligned:
+    if score >= 76 and (ml_prob is None or ml_prob >= ml_thresh + 0.035) and macro_aligned:
         return "A+"
-    if score >= 72 and (ml_prob is None or ml_prob >= ml_thresh + 0.02):
+    if score >= 72 and (ml_prob is None or ml_prob >= ml_thresh + 0.015):
         return "A"
     return "B"
 
@@ -441,7 +441,7 @@ def _send_notifications(new_alerts: List[Dict[str, Any]]) -> None:
     tg_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     discord_url = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 
-    lines = ["*LeadingConfluencePro v3.5 — Confirmed Live Signals*"]
+    lines = ["*LeadingConfluencePro v3.6 — Confirmed Live Signals*"]
     for a in new_alerts:
         prob_txt = f" | ML {a['ml_prob']*100:.0f}%" if a.get("ml_prob") is not None else ""
         grade_txt = f" [{a.get('grade', 'B')}]"
@@ -547,6 +547,8 @@ def run_live_scan() -> Dict[str, Any]:
                 min_score=int(cfg.get("min_score", 65)),
                 vwap_period=int(cfg.get("vwap_period", 50)),
                 sl_buffer_atr=float(cfg.get("sl_buffer_atr", 0.25)),
+                cooldown_bars=4,
+                allow_consecutive=True,
                 min_sl_atr=1.10,
                 tp1_mult=float(cfg.get("tp1_mult", 0.50)),
                 tp2_mult=float(cfg.get("tp2_mult", 3.00)),
