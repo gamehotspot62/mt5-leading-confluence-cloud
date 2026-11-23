@@ -7,9 +7,9 @@
 //+------------------------------------------------------------------+
 #property copyright "LeadingConfluencePro Quantitative Architecture"
 #property link      "https://github.com/gamehotspot62/mt5-leading-confluence-cloud"
-#property version   "1.00"
-#property description "Optional M15 Auto-Entry EA paired with LeadingConfluencePro.ex5."
-#property description "Evaluates strictly shift=1 (closed M15 bar) and manages TP1 partial + BE."
+#property version   "1.10"
+#property description "Optional M15 Auto-Entry EA paired with LeadingConfluencePro.ex5 v3.50."
+#property description "Evaluates strictly shift=1 (closed M15 bar) and manages TP1 partial + Protected-Runner SL."
 
 //--- Input Parameters
 input group "=== 1. Signal Source & Entry Timeframe ==="
@@ -27,9 +27,10 @@ input int             InpMaxPositionsPerSymbol= 1;                      // Max O
 input bool            InpCloseOppositeOnSignal= false;                  // Close Opposing Position Before Opening New Signal
 input int             InpSlippagePoints       = 20;                     // Max Order Slippage (Points)
 
-input group "=== 3. TP1 Partial Close & Breakeven Management ==="
-input bool            InpMoveSLToBEAtTP1      = true;                   // Move Stop Loss to Breakeven When TP1 Reached
-input double          InpPartialClosePctAtTP1 = 50.0;                   // % Volume to Close at TP1 (0 = Disable Partial)
+input group "=== 3. TP1 Partial Close & Protected-Runner Management ==="
+input bool            InpMoveSLToBEAtTP1      = true;                   // Move Stop Loss to Protected-Runner Level at TP1
+input double          InpPartialClosePctAtTP1 = 65.0;                   // % Volume to Close at TP1 (0 = Disable Partial)
+input double          InpRunnerSLRiskMultAtTP1= -0.50;                  // Protected Runner SL in R (-0.50 = Half SL, 0 = BE)
 
 //--- Runtime Globals
 int      g_indHandle        = INVALID_HANDLE;
@@ -150,8 +151,9 @@ void CloseOpposingPositions(const ENUM_POSITION_TYPE targetCloseType)
                      ticket, res.retcode, GetLastError());
       else
       {
-         GlobalVariableDel("LCP_EA_TP1_" + IntegerToString((long)ticket));
-         GlobalVariableDel("LCP_EA_BE_"  + IntegerToString((long)ticket));
+         GlobalVariableDel("LCP_EA_TP1_"  + IntegerToString((long)ticket));
+         GlobalVariableDel("LCP_EA_RISK_" + IntegerToString((long)ticket));
+         GlobalVariableDel("LCP_EA_BE_"   + IntegerToString((long)ticket));
       }
    }
 }
@@ -176,8 +178,9 @@ void ManageOpenPositions()
       if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
       if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
 
-      string beKey  = "LCP_EA_BE_"  + IntegerToString((long)ticket);
-      string tp1Key = "LCP_EA_TP1_" + IntegerToString((long)ticket);
+      string beKey   = "LCP_EA_BE_"   + IntegerToString((long)ticket);
+      string tp1Key  = "LCP_EA_TP1_"  + IntegerToString((long)ticket);
+      string riskKey = "LCP_EA_RISK_" + IntegerToString((long)ticket);
       if(GlobalVariableCheck(beKey) && GlobalVariableGet(beKey) > 0.5)
          continue;
 
@@ -187,14 +190,19 @@ void ManageOpenPositions()
       double curTP     = PositionGetDouble(POSITION_TP);
       double curVol    = PositionGetDouble(POSITION_VOLUME);
 
+      double initRisk = GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : MathAbs(openPrice - curSL);
       double tp1Price = 0.0;
       if(GlobalVariableCheck(tp1Key))
       {
          tp1Price = GlobalVariableGet(tp1Key);
       }
+      else if(initRisk > 0.0)
+      {
+         tp1Price = (posType == POSITION_TYPE_BUY) ? (openPrice + 0.50 * initRisk) : (openPrice - 0.50 * initRisk);
+      }
       else if(curTP > 0.0)
       {
-         tp1Price = openPrice + (curTP - openPrice) * 0.60;
+         tp1Price = openPrice + (curTP - openPrice) * 0.20;
       }
       if(tp1Price <= 0.0)
          continue;
@@ -234,16 +242,17 @@ void ManageOpenPositions()
          }
       }
 
-      // 2) Move Stop Loss to Breakeven (+2 points buffer)
-      if(InpMoveSLToBEAtTP1)
+      // 2) Move Stop Loss to Protected-Runner level (default -0.50R, or BE+2pts when 0.0)
+      if(InpMoveSLToBEAtTP1 && initRisk > 0.0)
       {
-         double beSL = (posType == POSITION_TYPE_BUY)
-                       ? NormalizeDouble(openPrice + 2.0 * _Point, _Digits)
-                       : NormalizeDouble(openPrice - 2.0 * _Point, _Digits);
+         double bePad = (InpRunnerSLRiskMultAtTP1 >= 0.0) ? (2.0 * _Point) : 0.0;
+         double protSL = (posType == POSITION_TYPE_BUY)
+                         ? NormalizeDouble(openPrice + InpRunnerSLRiskMultAtTP1 * initRisk + bePad, _Digits)
+                         : NormalizeDouble(openPrice - InpRunnerSLRiskMultAtTP1 * initRisk - bePad, _Digits);
 
          bool validMove = (posType == POSITION_TYPE_BUY)
-                          ? (beSL > curSL && (bid - beSL) >= minStopDist)
-                          : ((curSL == 0.0 || beSL < curSL) && (beSL - ask) >= minStopDist);
+                          ? (protSL > curSL && (bid - protSL) >= minStopDist)
+                          : ((curSL == 0.0 || protSL < curSL) && (protSL - ask) >= minStopDist);
 
          if(validMove && PositionSelectByTicket(ticket))
          {
@@ -254,12 +263,12 @@ void ManageOpenPositions()
             mReq.action   = TRADE_ACTION_SLTP;
             mReq.position = ticket;
             mReq.symbol   = _Symbol;
-            mReq.sl       = beSL;
+            mReq.sl       = protSL;
             mReq.tp       = curTP;
             if(!OrderSend(mReq, mRes))
-               PrintFormat("LeadingConfluenceAutoEntry_M15: BE SL update failed (ticket=%I64u, ret=%u)", ticket, mRes.retcode);
+               PrintFormat("LeadingConfluenceAutoEntry_M15: Protected SL update failed (ticket=%I64u, ret=%u)", ticket, mRes.retcode);
             else
-               PrintFormat("LeadingConfluenceAutoEntry_M15: Moved SL to BE (%s) on #%I64u", DoubleToString(beSL, _Digits), ticket);
+               PrintFormat("LeadingConfluenceAutoEntry_M15: Moved SL to Protected Level (%s) on #%I64u", DoubleToString(protSL, _Digits), ticket);
          }
       }
 
@@ -422,7 +431,7 @@ void OnTick()
                DoubleToString(tp2Price, _Digits),
                res.deal);
 
-   // Store TP1 target per open position ticket
+   // Store TP1 target and initial risk distance per open position ticket
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       ulong ticket = PositionGetTicket(i);
@@ -430,9 +439,12 @@ void OnTick()
       if(PositionGetString(POSITION_SYMBOL) == _Symbol &&
          (ulong)PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
       {
-         string tp1Key = "LCP_EA_TP1_" + IntegerToString((long)ticket);
+         string tp1Key  = "LCP_EA_TP1_"  + IntegerToString((long)ticket);
+         string riskKey = "LCP_EA_RISK_" + IntegerToString((long)ticket);
          if(!GlobalVariableCheck(tp1Key))
             GlobalVariableSet(tp1Key, tp1Price);
+         if(!GlobalVariableCheck(riskKey))
+            GlobalVariableSet(riskKey, slDist);
       }
    }
 }

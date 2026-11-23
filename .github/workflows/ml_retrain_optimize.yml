@@ -1,8 +1,8 @@
-name: Cloud Weekly ML Retraining & Walk-Forward Optimization
+name: Cloud Daily Self-Evolving ML Retraining & Walk-Forward Optimization
 
 on:
   schedule:
-    - cron: "0 4 * * 0"
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -34,17 +34,17 @@ jobs:
       - name: Refresh Macro / On-Chain / ETF / COT Feeds
         run: python cloud/fetch_macro_data.py
 
-      - name: Run Purged Walk-Forward Parameter Optimizer & ML Meta-Labeler
+      - name: Run 1-Year Self-Evolving Purged Walk-Forward Optimizer & ML Meta-Labeler
         run: python cloud/ml_optimizer.py
 
-      - name: Refresh Live Signal Scanner with Newly Trained ML Weights
+      - name: Refresh Live Signal Scanner & Outcome Ledger with Newly Trained ML Weights
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python cloud/live_signal_scanner.py
 
-      - name: Commit & push optimized configs & ML model weights
+      - name: Commit & push optimized configs, ML weights & evolution log
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -57,7 +57,7 @@ jobs:
             git stash drop
             git add data/
             if ! git diff --staged --quiet; then
-              git commit -m "chore(ml): retrain purged walk-forward meta-model & optimize params"
+              git commit -m "chore(ml): daily 1y self-evolving walk-forward ML retrain"
               git push origin main
             fi
           else

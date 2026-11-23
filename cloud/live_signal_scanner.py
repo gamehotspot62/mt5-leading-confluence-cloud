@@ -1,9 +1,10 @@
 """
-24/7 Cloud Live Signal Scanner & Optional Telegram / Discord Notifier.
-- Loads MacroFlowBias.csv, OptimizedConfig.csv, and MLModelWeights.csv
-- Fetches fresh 1h (also resampled to 4h) candles for all 10 watchlist symbols
-- Evaluates strictly closed bars (iloc[-2]) using identical MQL5 v2.00 logic + ML gate
-- Writes data/latest_signals.json and deduplicates alerts via data/alert_state.json
+24/7 Cloud Live Signal Scanner, Live Outcome Grader & Optional Telegram / Discord Notifier (v3.5).
+- Loads MacroFlowBias.csv, OptimizedConfig.csv, and 18-feature MLModelWeights.csv
+- Fetches fresh 15m / 1h candles for all 10 watchlist symbols
+- Evaluates strictly closed bars using identical MQL5 v3.50 logic + ML gate
+- Persists & auto-grades live confirmed signals in data/signal_outcomes_ledger.json
+- Writes data/latest_signals.json (with live_outcome_audit) and deduplicates alerts via data/alert_state.json
 - Dispatches Telegram/Discord notifications only if secret env vars are configured
 """
 
@@ -82,13 +83,15 @@ def _load_ml_weights() -> Dict[str, Dict[str, Any]]:
         parts = [p.strip() for p in line.split(",")]
         if len(parts) < 33:
             continue
+        n_feat = 18 if len(parts) >= 57 else 10
         sym = parts[0].upper()
         out[sym] = {
             "intercept": float(parts[1]),
             "ml_min_prob": float(parts[2]),
-            "means": [float(x) for x in parts[3:13]],
-            "stds": [float(x) for x in parts[13:23]],
-            "weights": [float(x) for x in parts[23:33]],
+            "n_features": n_feat,
+            "means": [float(x) for x in parts[3 : 3 + n_feat]],
+            "stds": [float(x) for x in parts[3 + n_feat : 3 + 2 * n_feat]],
+            "weights": [float(x) for x in parts[3 + 2 * n_feat : 3 + 3 * n_feat]],
         }
     return out
 
@@ -97,7 +100,8 @@ def _eval_ml_prob(model: Optional[Dict[str, Any]], feats: List[float]) -> Option
     if not model:
         return None
     z = float(model["intercept"])
-    for i in range(10):
+    n_f = min(len(feats), len(model["weights"]), len(model["means"]), len(model["stds"]))
+    for i in range(n_f):
         s = model["stds"][i] if abs(model["stds"][i]) > 1e-9 else 1.0
         x_norm = (feats[i] - model["means"][i]) / s
         z += model["weights"][i] * x_norm
@@ -171,6 +175,7 @@ def _compute_live_bar_features_and_probs(
     macro_val: int,
     ml_model: Optional[Dict[str, Any]],
     latest_sig_dir: int = 0,
+    latest_sig_prob: Optional[float] = None,
 ) -> Tuple[Optional[float], Optional[float], str]:
     h = tf_df["high"].values.astype(float)
     l = tf_df["low"].values.astype(float)
@@ -186,13 +191,17 @@ def _compute_live_bar_features_and_probs(
     net_delta3 = float(np.sum(v[s_i : idx + 1] * ofi_arr[s_i : idx + 1]) / max(sum_vol3, 1.0))
 
     body = c[idx] - o[idx]
-    at = float(st["atr"][idx])
+    at = max(float(st["atr"][idx]), 1e-9)
     rvol_i = float(st["rvol"][idx])
     z_i = float(st["vwap_z"][idx])
+    vw_i = float(st["vwap"][idx])
     ker_i = float(st["ker"][idx])
     htf_i = int(st["htf_bias"][idx])
     atr_pct_i = float(st["atr_pct"][idx])
     sqz_i = int(st["sqz_on"][idx])
+    bar_ts = pd.Timestamp(tf_df["time"].iloc[idx])
+    is_london_ny = 1.0 if (7 <= bar_ts.hour <= 20) else 0.0
+    body_atr = float(np.clip(abs(body) / at, 0.0, 4.0))
 
     bull_fvg_disp = 1.0 if ((idx >= 2 and l[idx] > h[idx - 2]) or (body >= 0.65 * at and rvol_i >= 1.25 and clv_i >= 0.50)) else 0.0
     bear_fvg_disp = 1.0 if ((idx >= 2 and h[idx] < l[idx - 2]) or ((-body) >= 0.65 * at and rvol_i >= 1.25 and clv_i <= -0.50)) else 0.0
@@ -209,10 +218,23 @@ def _compute_live_bar_features_and_probs(
             float(atr_pct_i / 100.0),
             float(bull_fvg_disp if d == 1 else bear_fvg_disp),
             float((d * float(macro_val)) / 100.0),
+            float(np.clip(d * ((c[idx] - vw_i) / at), -6.0, 6.0)),
+            1.10,
+            body_atr,
+            0.70,
+            0.0,
+            is_london_ny,
+            0.0,
+            0.0,
         ]
 
     p_buy = _eval_ml_prob(ml_model, _feats(1))
     p_sell = _eval_ml_prob(ml_model, _feats(-1))
+
+    if latest_sig_dir == 1 and latest_sig_prob is not None:
+        p_buy = float(latest_sig_prob)
+    elif latest_sig_dir == -1 and latest_sig_prob is not None:
+        p_sell = float(latest_sig_prob)
 
     if latest_sig_dir == 1:
         status = "CONFIRMED BUY"
@@ -234,6 +256,183 @@ def _compute_live_bar_features_and_probs(
     )
 
 
+def _grade_ledger_for_series(
+    entries: List[Dict[str, Any]],
+    sym: str,
+    tf_name: str,
+    tf_df: pd.DataFrame,
+    tp1_weight: float = 0.65,
+    runner_sl_r: float = -0.50,
+    max_hold: int = 48,
+    cost_r: float = 0.05,
+) -> None:
+    """
+    Auto-grade OPEN live signal ledger entries using strictly subsequent closed bars
+    with conservative SL-first intra-bar tie-breaking matching label_candidates().
+    """
+    if tf_df.empty:
+        return
+    tf_times = pd.to_datetime(tf_df["time"], utc=True)
+    h_arr = tf_df["high"].values.astype(float)
+    l_arr = tf_df["low"].values.astype(float)
+    c_arr = tf_df["close"].values.astype(float)
+    w2 = 1.0 - tp1_weight
+
+    for ent in entries:
+        if ent.get("status") != "OPEN":
+            continue
+        if str(ent.get("symbol", "")).upper() != sym or str(ent.get("timeframe", "")).upper() != tf_name:
+            continue
+        ent_ts = pd.Timestamp(ent["bar_time_utc"])
+        if ent_ts.tzinfo is None:
+            ent_ts = ent_ts.tz_localize("UTC")
+
+        sub_idx = np.where(tf_times.values > np.datetime64(ent_ts.tz_convert("UTC").to_datetime64()))[0]
+        if len(sub_idx) == 0:
+            continue
+
+        d = 1 if str(ent.get("direction", "BUY")).upper() == "BUY" else -1
+        entry_p = float(ent["entry"])
+        sl_p = float(ent["sl"])
+        tp1_p = float(ent["tp1"])
+        tp2_p = float(ent["tp2"])
+        risk_p = max(float(ent.get("risk") or abs(entry_p - sl_p)), 1e-10)
+        tp1_r = max(0.10, ((tp1_p - entry_p) * d) / risk_p)
+        tp2_r = max(tp1_r, ((tp2_p - entry_p) * d) / risk_p)
+
+        hit_tp1 = False
+        hit_tp2 = False
+        resolved_sl = False
+        cur_sl = sl_p
+        resolved_pos = None
+
+        steps = min(max_hold, len(sub_idx))
+        for j in range(steps):
+            k = int(sub_idx[j])
+            if d == 1:
+                if l_arr[k] <= cur_sl:
+                    resolved_sl = True
+                    resolved_pos = k
+                    break
+                if h_arr[k] >= tp2_p:
+                    hit_tp1 = True
+                    hit_tp2 = True
+                    resolved_pos = k
+                    break
+                if h_arr[k] >= tp1_p and not hit_tp1:
+                    hit_tp1 = True
+                    cur_sl = entry_p + d * runner_sl_r * risk_p
+            else:
+                if h_arr[k] >= cur_sl:
+                    resolved_sl = True
+                    resolved_pos = k
+                    break
+                if l_arr[k] <= tp2_p:
+                    hit_tp1 = True
+                    hit_tp2 = True
+                    resolved_pos = k
+                    break
+                if l_arr[k] <= tp1_p and not hit_tp1:
+                    hit_tp1 = True
+                    cur_sl = entry_p + d * runner_sl_r * risk_p
+
+        ent["hit_tp1"] = bool(hit_tp1)
+        ent["cur_sl"] = round(float(cur_sl), 6)
+
+        if hit_tp2:
+            r_net = tp1_weight * tp1_r + w2 * tp2_r - cost_r
+            ent["status"] = "WIN_TP2"
+            ent["r_net"] = round(float(r_net), 4)
+            ent["resolved_utc"] = pd.Timestamp(tf_df["time"].iloc[int(resolved_pos)]).strftime("%Y-%m-%dT%H:%MZ")
+        elif resolved_sl:
+            if hit_tp1:
+                r_net = tp1_weight * tp1_r + w2 * runner_sl_r - cost_r
+                ent["status"] = "WIN_TP1_PROTECTED" if r_net > 0 else "LOSS_SL"
+            else:
+                r_net = -1.0 - cost_r
+                ent["status"] = "LOSS_SL"
+            ent["r_net"] = round(float(r_net), 4)
+            ent["resolved_utc"] = pd.Timestamp(tf_df["time"].iloc[int(resolved_pos)]).strftime("%Y-%m-%dT%H:%MZ")
+        elif len(sub_idx) >= max_hold:
+            last_k = int(sub_idx[max_hold - 1])
+            mtm = ((c_arr[last_k] - entry_p) * d) / risk_p
+            if hit_tp1:
+                mtm = max(runner_sl_r, min(tp2_r, mtm))
+                r_net = tp1_weight * tp1_r + w2 * mtm - cost_r
+            else:
+                mtm = max(-1.0, min(tp1_r, mtm))
+                r_net = mtm - cost_r
+            ent["status"] = "WIN_EXPIRY" if r_net > 0 else "LOSS_EXPIRY"
+            ent["r_net"] = round(float(r_net), 4)
+            ent["resolved_utc"] = pd.Timestamp(tf_df["time"].iloc[last_k]).strftime("%Y-%m-%dT%H:%MZ")
+
+
+def _build_live_outcome_audit(entries: List[Dict[str, Any]], now_dt: pd.Timestamp) -> Dict[str, Any]:
+    open_cnt = sum(1 for e in entries if e.get("status") == "OPEN")
+    graded = [e for e in entries if e.get("status") != "OPEN" and e.get("r_net") is not None]
+    graded.sort(key=lambda e: str(e.get("resolved_utc") or e.get("bar_time_utc") or ""))
+
+    cutoff_30d = now_dt - pd.Timedelta(days=30)
+    graded_30d = 0
+    for e in graded:
+        ts = pd.Timestamp(e.get("resolved_utc") or e.get("bar_time_utc"))
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        if ts >= cutoff_30d:
+            graded_30d += 1
+
+    if graded:
+        r_vals = [float(e["r_net"]) for e in graded]
+        wins = [rv > 0.0 for rv in r_vals]
+        live_win_pct = round(100.0 * float(np.mean(wins)), 1)
+        live_exp_r = round(float(np.mean(r_vals)), 3)
+        gp = float(sum(rv for rv in r_vals if rv > 0.0))
+        gl = float(abs(sum(rv for rv in r_vals if rv < 0.0)))
+        live_pf = round(min(9.99, gp / max(gl, 1e-6)), 2) if gp > 0.0 else 0.0
+        tp1_hit_pct = round(100.0 * float(np.mean([bool(e.get("hit_tp1")) for e in graded])), 1)
+    else:
+        live_win_pct = None
+        live_exp_r = None
+        live_pf = None
+        tp1_hit_pct = None
+
+    recent20 = graded[-20:]
+    if len(recent20) < 10:
+        drift_status = "AWAITING_SAMPLES"
+    else:
+        r20 = [float(e["r_net"]) for e in recent20]
+        w20 = 100.0 * float(np.mean([rv > 0.0 for rv in r20]))
+        e20 = float(np.mean(r20))
+        drift_status = "DRIFT_ALERT" if (w20 < 60.0 or e20 < -0.05) else "NOMINAL"
+
+    recent_trimmed = [
+        {
+            "symbol": e.get("symbol"),
+            "timeframe": e.get("timeframe"),
+            "bar_time_utc": e.get("bar_time_utc"),
+            "direction": e.get("direction"),
+            "playbook": e.get("playbook"),
+            "ml_prob": e.get("ml_prob"),
+            "status": e.get("status"),
+            "r_net": e.get("r_net"),
+            "resolved_utc": e.get("resolved_utc"),
+        }
+        for e in reversed(graded[-10:])
+    ]
+
+    return {
+        "open_count": open_cnt,
+        "graded_total": len(graded),
+        "graded_30d": graded_30d,
+        "live_win_pct": live_win_pct,
+        "live_exp_r": live_exp_r,
+        "live_pf": live_pf,
+        "tp1_hit_pct": tp1_hit_pct,
+        "drift_status": drift_status,
+        "recent_graded": recent_trimmed,
+    }
+
+
 def _send_notifications(new_alerts: List[Dict[str, Any]]) -> None:
     if not new_alerts:
         return
@@ -242,7 +441,7 @@ def _send_notifications(new_alerts: List[Dict[str, Any]]) -> None:
     tg_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     discord_url = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 
-    lines = ["*LeadingConfluencePro Cloud — Confirmed Live Signals*"]
+    lines = ["*LeadingConfluencePro v3.5 — Confirmed Live Signals*"]
     for a in new_alerts:
         prob_txt = f" | ML {a['ml_prob']*100:.0f}%" if a.get("ml_prob") is not None else ""
         grade_txt = f" [{a.get('grade', 'B')}]"
@@ -250,7 +449,7 @@ def _send_notifications(new_alerts: List[Dict[str, Any]]) -> None:
         lines.append(
             f"• *{a['symbol']} {a['timeframe']}* `{a['direction']}` ({a['playbook']}){grade_txt} "
             f"| Score `{a['score']}/100`{prob_txt} | Macro `{a['macro_bias']:+d}`{risk_txt}\n"
-            f"  Entry: `{a['entry']:.5g}` | SL: `{a['sl']:.5g}` ({a.get('sl_dist_pct', 0):.2f}%) | TP1: `{a['tp1']:.5g}` | TP2: `{a['tp2']:.5g}`"
+            f"  Entry: `{a['entry']:.5g}` | SL: `{a['sl']:.5g}` ({a.get('sl_dist_pct', 0):.2f}%) | TP1(65%+rSL): `{a['tp1']:.5g}` | TP2: `{a['tp2']:.5g}`"
         )
     text_msg = "\n".join(lines)
 
@@ -295,6 +494,17 @@ def run_live_scan() -> Dict[str, Any]:
             sent_keys = []
     sent_set = set(sent_keys)
 
+    ledger_file = DATA_DIR / "signal_outcomes_ledger.json"
+    ledger_entries: List[Dict[str, Any]] = []
+    if ledger_file.exists():
+        try:
+            loaded_l = json.loads(ledger_file.read_text(encoding="utf-8"))
+            if isinstance(loaded_l, dict) and isinstance(loaded_l.get("entries"), list):
+                ledger_entries = [e for e in loaded_l["entries"] if isinstance(e, dict) and e.get("sig_id")]
+        except Exception:
+            ledger_entries = []
+    ledger_map: Dict[str, Dict[str, Any]] = {str(e["sig_id"]): e for e in ledger_entries}
+
     watchlist_telemetry: List[Dict[str, Any]] = []
     confirmed_signals: List[Dict[str, Any]] = []
     closed_market_signals: List[Dict[str, Any]] = []
@@ -326,6 +536,9 @@ def run_live_scan() -> Dict[str, Any]:
             if len(tf_df) < 90:
                 continue
 
+            # Grade OPEN ledger outcomes on this (sym, tf_name) series first
+            _grade_ledger_for_series(ledger_entries, sym, tf_name, tf_df)
+
             cfg = cfg_map.get(
                 (sym, tf_name),
                 cfg_map.get((sym, "M15"), cfg_map.get((sym, "H1"), cfg_map.get(("GLOBAL", "ALL"), {}))),
@@ -335,15 +548,15 @@ def run_live_scan() -> Dict[str, Any]:
                 vwap_period=int(cfg.get("vwap_period", 50)),
                 sl_buffer_atr=float(cfg.get("sl_buffer_atr", 0.25)),
                 min_sl_atr=1.10,
-                tp1_mult=float(cfg.get("tp1_mult", 1.8)),
-                tp2_mult=float(cfg.get("tp2_mult", 3.0)),
+                tp1_mult=float(cfg.get("tp1_mult", 0.50)),
+                tp2_mult=float(cfg.get("tp2_mult", 3.00)),
                 en_sweep=bool(cfg.get("en_sweep", True)),
                 en_squeeze=bool(cfg.get("en_squeeze", True)),
                 en_pullback=bool(cfg.get("en_pullback", True)),
             )
             oos_exp_r = float(cfg.get("oos_exp_r", 0.0))
             wf_status = str(cfg.get("status", "GLOBAL_MODEL"))
-            ml_thresh = float(cfg.get("ml_min_prob", ml_model["ml_min_prob"] if ml_model else 0.35))
+            ml_thresh = float(cfg.get("ml_min_prob", ml_model["ml_min_prob"] if ml_model else 0.65))
 
             macro_arr = np.full(len(tf_df), float(macro_val), dtype=float)
             res = compute_indicators_and_candidates(
@@ -358,8 +571,8 @@ def run_live_scan() -> Dict[str, Any]:
             last_closed_idx = len(tf_df) - 1
             st = res["state"]
             latest_sig_dir = 0
+            latest_sig_prob: Optional[float] = None
 
-            # Evaluate signals first so M15 telemetry reflects confirmed signal status
             max_dash_bars = 5 if tf_name == "M15" else 2
             max_dash_age = (3 * 3600) if tf_name == "M15" else (6 * 3600)
             max_alert_bars = 3 if tf_name == "M15" else 1
@@ -373,6 +586,7 @@ def run_live_scan() -> Dict[str, Any]:
 
                 if cand["bar_idx"] == last_closed_idx:
                     latest_sig_dir = int(cand["dir"])
+                    latest_sig_prob = prob
 
                 cand_ts = pd.Timestamp(cand["time"])
                 if cand_ts.tzinfo is None:
@@ -411,6 +625,35 @@ def run_live_scan() -> Dict[str, Any]:
                         confirmed_signals.append(sig_obj)
                     if cand["bar_idx"] >= last_closed_idx - max_alert_bars and bar_age_sec <= max_alert_age:
                         alert_key = f"{sym}|{tf_name}|{sig_obj['bar_time_utc']}|{dir_str}"
+                        if alert_key not in ledger_map:
+                            new_l_ent = {
+                                "sig_id": alert_key,
+                                "symbol": sym,
+                                "asset_class": meta["asset_class"],
+                                "timeframe": tf_name,
+                                "bar_time_utc": sig_obj["bar_time_utc"],
+                                "direction": dir_str,
+                                "playbook": cand["playbook"],
+                                "score": int(cand["score"]),
+                                "grade": grade,
+                                "ml_prob": sig_obj["ml_prob"],
+                                "ml_thresh": round(ml_thresh, 3),
+                                "entry": sig_obj["entry"],
+                                "sl": sig_obj["sl"],
+                                "tp1": sig_obj["tp1"],
+                                "tp2": sig_obj["tp2"],
+                                "risk": round(float(cand.get("risk", abs(entry_val - sl_val))), 6),
+                                "features": [round(float(x), 6) for x in cand["features"]],
+                                "status": "OPEN",
+                                "hit_tp1": False,
+                                "cur_sl": sig_obj["sl"],
+                                "r_net": None,
+                                "resolved_utc": None,
+                            }
+                            ledger_map[alert_key] = new_l_ent
+                            ledger_entries.append(new_l_ent)
+                            # Grade immediately if later bars already closed after this signal within max_alert_bars
+                            _grade_ledger_for_series([new_l_ent], sym, tf_name, tf_df)
                         if alert_key not in sent_set:
                             sent_set.add(alert_key)
                             sent_keys.append(alert_key)
@@ -421,7 +664,13 @@ def run_live_scan() -> Dict[str, Any]:
 
             if tf_name == "M15":
                 p_buy, p_sell, setup_status = _compute_live_bar_features_and_probs(
-                    tf_df, st, last_closed_idx, int(macro_val), ml_model, latest_sig_dir=latest_sig_dir
+                    tf_df,
+                    st,
+                    last_closed_idx,
+                    int(macro_val),
+                    ml_model,
+                    latest_sig_dir=latest_sig_dir,
+                    latest_sig_prob=latest_sig_prob,
                 )
                 watchlist_telemetry.append(
                     {
@@ -443,12 +692,20 @@ def run_live_scan() -> Dict[str, Any]:
                         "sqz_on": int(st["sqz_on"][last_closed_idx]),
                         "htf_bias": int(st["htf_bias"][last_closed_idx]),
                         "min_score": params.min_score,
-                        "ml_min_prob": round(ml_thresh, 2),
+                        "ml_min_prob": round(ml_thresh, 3),
                         "ml_buy_prob": p_buy,
                         "ml_sell_prob": p_sell,
                         "setup_status": setup_status,
                     }
                 )
+
+    ledger_entries.sort(key=lambda e: str(e.get("bar_time_utc", "")))
+    ledger_entries = ledger_entries[-1500:]
+    ledger_file.write_text(
+        json.dumps({"updated_utc": now_iso, "entries": ledger_entries}, indent=2),
+        encoding="utf-8",
+    )
+    live_outcome_audit = _build_live_outcome_audit(ledger_entries, now_dt)
 
     _send_notifications(new_alerts)
     sent_keys = sent_keys[-500:]
@@ -460,6 +717,7 @@ def run_live_scan() -> Dict[str, Any]:
         "fresh_alerts_dispatched": len(new_alerts),
         "recent_confirmed_signals": confirmed_signals,
         "closed_market_last_signals": closed_market_signals,
+        "live_outcome_audit": live_outcome_audit,
         "telemetry": watchlist_telemetry,
     }
     (DATA_DIR / "latest_signals.json").write_text(json.dumps(output, indent=2), encoding="utf-8")
@@ -468,8 +726,10 @@ def run_live_scan() -> Dict[str, Any]:
 
 if __name__ == "__main__":
     res = run_live_scan()
+    audit = res.get("live_outcome_audit", {})
     print(
         f"[{res['updated_utc']}] Scanned {res['watchlist_count']} symbols | "
         f"Recent signals: {len(res['recent_confirmed_signals'])} | "
-        f"New fresh alerts: {res['fresh_alerts_dispatched']}"
+        f"New alerts: {res['fresh_alerts_dispatched']} | "
+        f"Ledger: open={audit.get('open_count', 0)}, graded={audit.get('graded_total', 0)}"
     )

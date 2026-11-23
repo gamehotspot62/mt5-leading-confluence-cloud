@@ -1,10 +1,10 @@
 """
-Exact Causal Python Mirror of LeadingConfluencePro v2.00 Feature & Signal Engine.
+Exact Causal Python Mirror of LeadingConfluencePro v3.50 Feature & Signal Engine.
 Zero look-ahead:
   - Swing pivots confirm strictly at i = p + pivot_right
   - Higher-timeframe bias aligns strictly on completed HTF close timestamps
   - Signal evaluation uses only bars <= N - 2 (or evaluates closed bar index i)
-  - Computes 10 standardized directional ML meta-features [f0..f9]
+  - Computes 18 standardized directional ML meta-features [f0..f17]
 """
 
 from __future__ import annotations
@@ -16,10 +16,31 @@ import numpy as np
 import pandas as pd
 from scipy.special import ndtr
 
+FEATURE_NAMES_18: List[str] = [
+    "ofi_aligned",
+    "net_delta3_aligned",
+    "rvol_capped",
+    "vwap_z_aligned",
+    "ker",
+    "htf_bias_aligned",
+    "clv_aligned",
+    "atr_pct",
+    "fvg_disp_aligned",
+    "macro_bias_aligned",
+    "dist_vwap_atr",
+    "risk_atr",
+    "body_atr",
+    "score_norm",
+    "is_h1_or_higher",
+    "is_london_ny",
+    "is_multi",
+    "is_pull",
+]
+
 
 @dataclass
 class EngineParams:
-    min_score: int = 68
+    min_score: int = 65
     vwap_period: int = 50
     vwap_band_mult: float = 2.0
     vol_period: int = 20
@@ -41,8 +62,8 @@ class EngineParams:
     sl_buffer_atr: float = 0.25
     min_sl_atr: float = 1.10
     max_sl_atr: float = 2.50
-    tp1_mult: float = 1.8
-    tp2_mult: float = 3.0
+    tp1_mult: float = 0.50
+    tp2_mult: float = 3.00
     macro_hard_veto: bool = False
 
 
@@ -605,7 +626,8 @@ def compute_indicators_and_candidates(
             last_sig_bar = i
             last_sig_dir = final_dir
 
-            # Exact 10 directional ML features matching LeadingConfluencePro.mq5 v2.00
+            # Exact 18 directional ML features matching LeadingConfluencePro.mq5 v3.50
+            ts_i = pd.Timestamp(times[i])
             feat = [
                 float(final_dir * ofi[i]),
                 float(final_dir * net_delta3),
@@ -617,11 +639,19 @@ def compute_indicators_and_candidates(
                 float(atr_pct[i] / 100.0),
                 float(fvg_disp_aligned),
                 float((final_dir * mb) / 100.0),
+                float(np.clip(final_dir * ((c[i] - vwap_val[i]) / max(at, 1e-9)), -6.0, 6.0)),
+                float(np.clip(risk / max(at, 1e-9), 0.5, 4.0)),
+                float(np.clip(abs(c[i] - o[i]) / max(at, 1e-9), 0.0, 4.0)),
+                float(score_val / 100.0),
+                1.0 if base_tf in ("1h", "4h", "1d") else 0.0,
+                1.0 if (7 <= ts_i.hour <= 20) else 0.0,
+                1.0 if pb_name == "MultiConf" else 0.0,
+                1.0 if pb_name == "VWAPPull" else 0.0,
             ]
             candidates.append(
                 {
                     "bar_idx": i,
-                    "time": pd.Timestamp(times[i]),
+                    "time": ts_i,
                     "dir": final_dir,
                     "playbook": pb_name,
                     "score": score_val,
@@ -629,6 +659,7 @@ def compute_indicators_and_candidates(
                     "sl": sl,
                     "tp1": tp1,
                     "tp2": tp2,
+                    "risk": float(risk),
                     "features": feat,
                 }
             )
