@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-23T01:54:01Z",
+  "updated_utc": "2026-11-23T02:54:22Z",
   "global_bias": -14,
   "global_regime": {
     "vix": 35.89,
@@ -13,13 +13,13 @@
     "yield_curve_10y2y": 0.29,
     "fed_net_liq_trillion": 5.824,
     "fed_net_liq_4w_pct": 0.4,
-    "dxy": 103.77,
-    "dxy_ret20_pct": 1.77,
+    "dxy": 103.72,
+    "dxy_ret20_pct": 1.73,
     "breadth_rsp_spy_20d_pct": 5.54,
     "credit_hyg_tlt_20d_pct": -1.07,
     "tech_qqq_xlp_20d_pct": -15.72,
     "stablecoins": {
-      "total_usd_b": 282.65,
+      "total_usd_b": 282.66,
       "chg_7d_pct": -1.55,
       "chg_30d_pct": -5.99
     },
