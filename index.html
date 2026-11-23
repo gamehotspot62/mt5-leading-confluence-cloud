@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LeadingConfluencePro v3.6 — Self-Evolving Cloud Quant &amp; High-Win-Rate ML</title>
+  <title>LeadingConfluencePro v4.0 — Auto-Symbol DNA &amp; Dedicated Per-Symbol ML</title>
   <style>
     :root {
       --bg: #0b0f17;
@@ -98,7 +98,7 @@
   <div class="container">
     <header>
       <div>
-        <h1>LeadingConfluencePro v3.6 — 1-Year Self-Evolving ML &amp; Cloud Quant</h1>
+        <h1>LeadingConfluencePro v4.0 — Auto-Symbol DNA &amp; Dedicated Per-Symbol ML</h1>
         <div class="subtitle" id="timestamps">Loading cloud telemetry...</div>
         <div id="sessionStrip" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;font-size:0.75rem;"></div>
       </div>
@@ -120,7 +120,7 @@
     </div>
 
     <div class="section">
-      <h2>Cross-Asset Watchlist — Live M15 Microstructure + Macro / On-Chain / ETF / COT Matrix</h2>
+      <h2>Cross-Asset Watchlist — Live M15 Microstructure + Symbol DNA + Macro / ETF / COT Matrix</h2>
       <div id="marketNotice" style="display:none;margin-bottom:12px;padding:10px 14px;border-radius:8px;background:rgba(245,185,66,0.10);border:1px solid rgba(245,185,66,0.35);color:var(--gold);font-size:0.84rem;"></div>
       <table>
         <thead>
@@ -139,8 +139,9 @@
             <th title="100-bar ATR volatility percentile [0..100%]">ATR Pct</th>
             <th title="Causal Higher-Timeframe (H1) bias">HTF</th>
             <th title="Bollinger inside Keltner Volatility Squeeze">Sqz</th>
-            <th title="Live closed-bar ML net-profit win probability (BUY% / SELL%) vs active ML Gate">ML Win% (B / S)</th>
-            <th title="Live setup readiness & minimum Confluence Score gate">Setup / Gate</th>
+            <th title="Symbol-Specific ML win probability (BUY% / SELL%) vs active Gate">ML Win% (B / S)</th>
+            <th title="Symbol-specific Strategy DNA archetype &amp; active UTC session">DNA / Session</th>
+            <th title="Live setup readiness &amp; minimum Confluence Score gate">Setup / Gate</th>
           </tr>
         </thead>
         <tbody id="telemetryBody"></tbody>
@@ -155,14 +156,19 @@
         <div id="featWeights" style="margin-top:14px;"></div>
       </div>
       <div class="section">
-        <h2>Cloud Walk-Forward Optimized Configs</h2>
+        <h2>Cloud Walk-Forward Symbol-DNA Configs</h2>
         <table>
           <thead>
-            <tr><th>Symbol</th><th>TF</th><th>Score</th><th>VWAP</th><th>Playbooks</th><th>TP1/TP2</th><th>OOS Win%</th><th>OOS Exp(R)</th><th>OOS PF</th><th>Max DD</th><th>Status</th></tr>
+            <tr><th>Symbol</th><th>TF</th><th>DNA / Sess</th><th>Score</th><th>VWAP</th><th>Playbooks</th><th>MacW</th><th>TP1/TP2</th><th>OOS Win%</th><th>OOS Exp(R)</th><th>PF</th><th>Status</th></tr>
           </thead>
           <tbody id="cfgBody"></tbody>
         </table>
       </div>
+    </div>
+
+    <div class="section">
+      <h2>Dedicated Per-Symbol Empirical-Bayes ML Models &amp; Top Feature Drivers (10 Unique Models)</h2>
+      <div id="symMlTable" class="neu">Loading per-symbol ML models...</div>
     </div>
 
     <div class="two-col">
@@ -246,11 +252,30 @@
       return 0.5 * (1.0 + erfApprox(x / Math.SQRT2));
     }
 
+    function detectAssetClassJS(sym) {
+      const u = String(sym || "").toUpperCase();
+      if (u.includes("XAU") || u.includes("XAG")) return "CLASS_METALS";
+      if (u.includes("BTC") || u.includes("ETH")) return "CLASS_CRYPTO";
+      if (u.includes("OIL") || u.includes("WTI")) return "CLASS_ENERGY";
+      if (u.includes("US500") || u.includes("US100") || u.includes("US30") || u.includes("SPX") || u.includes("NAS")) return "CLASS_INDEX";
+      return "CLASS_FX";
+    }
+
+    function inUtcSessionJS(hr, s0, s1) {
+      if (s0 === 0 && s1 >= 24) return true;
+      if (s0 < s1) return hr >= s0 && hr < s1;
+      return hr >= s0 || hr < s1;
+    }
+
     function getSymConfig(sym, tfName) {
       const cfgs = liveState.ml?.optimized_configs || [];
+      const u = String(sym || "").toUpperCase();
+      const clsKey = detectAssetClassJS(u);
       return (
-        cfgs.find(c => String(c.SYMBOL).toUpperCase() === sym && String(c.TIMEFRAME).toUpperCase() === tfName) ||
-        cfgs.find(c => String(c.SYMBOL).toUpperCase() === sym && String(c.TIMEFRAME).toUpperCase() === "M15") ||
+        cfgs.find(c => String(c.SYMBOL).toUpperCase() === u && String(c.TIMEFRAME).toUpperCase() === tfName) ||
+        cfgs.find(c => String(c.SYMBOL).toUpperCase() === u && String(c.TIMEFRAME).toUpperCase() === "M15") ||
+        cfgs.find(c => String(c.SYMBOL).toUpperCase() === u && String(c.TIMEFRAME).toUpperCase() === "ALL") ||
+        cfgs.find(c => String(c.SYMBOL).toUpperCase() === clsKey && String(c.TIMEFRAME).toUpperCase() === "ALL") ||
         cfgs.find(c => String(c.SYMBOL).toUpperCase() === "GLOBAL" && String(c.TIMEFRAME).toUpperCase() === "ALL") ||
         null
       );
@@ -258,7 +283,8 @@
 
     function getResolvedMLModel(sym) {
       const models = liveState.ml?.ml_models;
-      if (models) return models[sym] || models.GLOBAL || null;
+      const u = String(sym || "").toUpperCase();
+      if (models) return models[u] || models[detectAssetClassJS(u)] || models.GLOBAL || null;
       return null;
     }
 
@@ -366,9 +392,17 @@
       const enSqueeze = cfg ? (Number(cfg.EN_SQUEEZE) !== 0) : true;
       const enPullback = cfg ? (Number(cfg.EN_PULLBACK) !== 0) : true;
       const mlThresh = Number(cfg?.ML_MIN_PROB) || Number(mlModel?.ml_min_prob) || 0.65;
+      const sessStart = (cfg?.SESS_START_UTC != null) ? Number(cfg.SESS_START_UTC) : 0;
+      const sessEnd = (cfg?.SESS_END_UTC != null) ? Number(cfg.SESS_END_UTC) : 24;
+      const htfMode = (cfg?.HTF_MODE != null) ? Number(cfg.HTF_MODE) : 0;
+      const macroWeight = (cfg?.MACRO_WEIGHT != null) ? Number(cfg.MACRO_WEIGHT) : 0.15;
+      const strategyTag = cfg?.STRATEGY_TAG || "ALL_24H";
+      const sessLabel = (sessStart === 0 && sessEnd >= 24) ? "24/7" : `${String(sessStart).padStart(2, "0")}-${String(sessEnd).padStart(2, "0")}Z`;
+      const mlModelTag = liveState.ml?.symbol_models?.[sym]?.model_tag || "GLOBAL";
 
       const atrPeriod = 14, volPeriod = 20, sqzPeriod = 20, kerPeriod = 14, bbMult = 2.0, kcMult = 1.5;
-      const pivotLeft = 5, pivotRight = 3, minSqzBars = 4, cooldownBars = 4;
+      const pivotLeft = 5, pivotRight = 3, minSqzBars = 4;
+      const cooldownBars = (cfg?.COOLDOWN_BARS != null) ? Math.max(1, Number(cfg.COOLDOWN_BARS)) : 4;
       const alphaFast = 2.0 / (sqzPeriod + 1.0);
       const alphaSlow = 2.0 / 51.0;
 
@@ -558,6 +592,9 @@
         if (bars[i].c > vwapVal[i]) sellReset = 1;
         if (i < warmup) continue;
 
+        const barHrUtc = new Date(bars[i].t).getUTCHours();
+        if (!inUtcSessionJS(barHrUtc, sessStart, sessEnd)) continue;
+
         const bi = bars[i], at = atr[i], rng = bi.h - bi.l;
         if (at <= 1e-10 || rng < 0.25 * at) continue;
         const recentSqz = (sqzCount[i - 1] >= minSqzBars || sqzCount[i - 2] >= minSqzBars || sqzCount[i - 3] >= minSqzBars);
@@ -609,7 +646,8 @@
         const bSwRawRisk = Math.abs(bi.c - (bSwExt - slBufAtr * at));
         const bSwRiskAtr = Math.max(1.10, Math.min(2.50, bSwRawRisk / Math.max(at, 1e-9)));
         const bQualSw = (bSwRiskAtr >= 1.45 && bodyAtrI <= 0.90);
-        const trigBSw = rawBSw && (trigBSq || trigBPl || (htfB === 0 && bQualSw));
+        const bSwHtfOk = (htfMode === 2) ? true : (htfMode === 1 ? (htfB === 1) : (htfB === 0));
+        const trigBSw = rawBSw && (trigBSq || trigBPl || (bSwHtfOk && bQualSw));
         if (trigBSw) {
           bExt = bSwExt;
           if (trigBSq || trigBPl) bExt = Math.min(bExt, Math.min(bi.l, bars[i - 1].l));
@@ -646,7 +684,8 @@
         const sSwRawRisk = Math.abs((sSwExt + slBufAtr * at) - bi.c);
         const sSwRiskAtr = Math.max(1.10, Math.min(2.50, sSwRawRisk / Math.max(at, 1e-9)));
         const sQualSw = (sSwRiskAtr >= 1.45 && bodyAtrI <= 0.90);
-        const trigSSw = rawSSw && (trigSSq || trigSPl || (htfB === 0 && sQualSw));
+        const sSwHtfOk = (htfMode === 2) ? true : (htfMode === 1 ? (htfB === -1) : (htfB === 0));
+        const trigSSw = rawSSw && (trigSSq || trigSPl || (sSwHtfOk && sQualSw));
         if (trigSSw) {
           sExt = sSwExt;
           if (trigSSq || trigSPl) sExt = Math.max(sExt, Math.max(bi.h, bars[i - 1].h));
@@ -673,7 +712,7 @@
           bScore += clvI >= 0.55 ? 5 : (clvI >= 0.35 ? 3 : 0);
           if (bi.c > bars[i - 1].h) bScore += 5;
           if (bullFvgDisp > 0.5) bScore += 4;
-          bScore += Math.round(0.15 * mb);
+          if (macroWeight > 0) bScore += Math.round(macroWeight * mb);
           bScore = Math.max(0, Math.min(100, bScore));
         }
 
@@ -696,7 +735,7 @@
           sScore += clvI <= -0.55 ? 5 : (clvI <= -0.35 ? 3 : 0);
           if (bi.c < bars[i - 1].l) sScore += 5;
           if (bearFvgDisp > 0.5) sScore += 4;
-          sScore -= Math.round(0.15 * mb);
+          if (macroWeight > 0) sScore -= Math.round(macroWeight * mb);
           sScore = Math.max(0, Math.min(100, sScore));
         }
 
@@ -771,6 +810,10 @@
                 grade: gVal,
                 suggested_risk_pct: suggestedRiskPctJS(gVal, oosExpR, prob, mlThresh),
                 wf_status: wfStatus,
+                strategy_tag: strategyTag,
+                sess_window: sessLabel,
+                macro_weight: Number(macroWeight.toFixed(2)),
+                ml_model_tag: mlModelTag,
                 score: scoreVal,
                 ml_prob: prob != null ? Number(prob.toFixed(3)) : null,
                 macro_bias: mb,
@@ -836,6 +879,10 @@
           sqz_on: sqzOn[idx],
           htf_bias: htfBias[idx],
           min_score: minScore,
+          strategy_tag: strategyTag,
+          sess_window: sessLabel,
+          macro_weight: Number(macroWeight.toFixed(2)),
+          ml_model_tag: mlModelTag,
           ml_min_prob: Number(mlThresh.toFixed(3)),
           ml_buy_prob: pBuy != null ? Number(pBuy.toFixed(3)) : null,
           ml_sell_prob: pSell != null ? Number(pSell.toFixed(3)) : null,
@@ -1151,6 +1198,8 @@
         const closedBadge = muted ? `<span class="pill">CLOSED</span>` : "";
         const slPctTxt = s.sl_dist_pct != null ? ` (${s.sl_dist_pct}%)` : "";
         const riskTxt = s.suggested_risk_pct != null ? ` &bull; Risk <strong>${s.suggested_risk_pct}%</strong>` : "";
+        const dnaTxt = s.strategy_tag ? ` &bull; DNA <strong>${s.strategy_tag}</strong>` : "";
+        const modelTxt = s.ml_model_tag ? ` <span class="neu">(${s.ml_model_tag})</span>` : "";
         return `
           <div class="sig-card ${isBuy ? "sig-buy" : "sig-sell"}" style="${muted ? "opacity:0.75;" : ""}">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px;">
@@ -1162,7 +1211,7 @@
               </div>
             </div>
             <div style="font-size:0.82rem;color:var(--muted);margin-bottom:8px;">
-              Closed: ${s.bar_time_utc} &bull; Score <strong>${s.score}/100</strong>${mlTxt}${riskTxt} &bull; Macro ${s.macro_bias >= 0 ? "+" : ""}${s.macro_bias}
+              Closed: ${s.bar_time_utc} &bull; Score <strong>${s.score}/100</strong>${mlTxt}${modelTxt}${dnaTxt}${riskTxt} &bull; Macro ${s.macro_bias >= 0 ? "+" : ""}${s.macro_bias}
             </div>
             <div style="font-family:monospace;font-size:0.83rem;">
               Entry: ${s.entry} | SL: <span class="neg">${s.sl}</span>${slPctTxt}<br/>
@@ -1238,7 +1287,7 @@
       const baseRows = signals?.telemetry || [];
       if (!baseRows.length) {
         if (notice) notice.style.display = "none";
-        tb.innerHTML = `<tr><td colspan="16" class="neu">No telemetry available yet.</td></tr>`;
+        tb.innerHTML = `<tr><td colspan="17" class="neu">No telemetry available yet.</td></tr>`;
         return;
       }
       let closedCount = 0;
@@ -1267,15 +1316,22 @@
           : "";
         const barTxt = r.bar_time_utc ? r.bar_time_utc.slice(5) : "—";
 
+        const symCfgM15 = getSymConfig(r.symbol, "M15");
+        const mlTag = r.ml_model_tag || liveState.ml?.symbol_models?.[r.symbol]?.model_tag || "GLOBAL";
+        const dnaTag = r.strategy_tag || symCfgM15?.STRATEGY_TAG || "ALL_24H";
+        const sessWin = r.sess_window || ((symCfgM15 && (Number(symCfgM15.SESS_START_UTC) !== 0 || Number(symCfgM15.SESS_END_UTC) < 24)) ? `${String(symCfgM15.SESS_START_UTC).padStart(2, "0")}-${String(symCfgM15.SESS_END_UTC).padStart(2, "0")}Z` : "24/7");
+
         const gatePct = (r.ml_min_prob != null) ? Number((r.ml_min_prob * 100).toFixed(1)) : "—";
         const pBuy = r.ml_buy_prob != null ? (r.ml_buy_prob * 100).toFixed(1) : null;
         const pSell = r.ml_sell_prob != null ? (r.ml_sell_prob * 100).toFixed(1) : null;
-        let mlCellHtml = `<span class="neu">Gate &ge;${gatePct}%</span>`;
+        let mlCellHtml = `<span class="neu">Gate &ge;${gatePct}%</span><div style="font-size:0.71rem;color:var(--blue)">${mlTag}</div>`;
         if (pBuy !== null && pSell !== null) {
           const bPass = r.ml_buy_prob >= r.ml_min_prob;
           const sPass = r.ml_sell_prob >= r.ml_min_prob;
-          mlCellHtml = `<span class="${bPass ? "pos" : "neu"}">B ${pBuy}%</span> / <span class="${sPass ? "neg" : "neu"}">S ${pSell}%</span><div style="font-size:0.72rem;color:var(--muted)">Gate &ge;${gatePct}%</div>`;
+          mlCellHtml = `<span class="${bPass ? "pos" : "neu"}">B ${pBuy}%</span> / <span class="${sPass ? "neg" : "neu"}">S ${pSell}%</span><div style="font-size:0.72rem;color:var(--muted)">Gate &ge;${gatePct}% &bull; <span style="color:var(--blue)">${mlTag}</span></div>`;
         }
+
+        const dnaCellHtml = `<span class="pill pill-info" style="font-size:0.72rem">${dnaTag}</span><div style="font-size:0.72rem;color:var(--muted)">${sessWin}</div>`;
 
         const stTxt = r.setup_status || "WAIT";
         let stCls = "";
@@ -1300,6 +1356,7 @@
           <td>${htf}</td>
           <td>${sqz}</td>
           <td>${mlCellHtml}</td>
+          <td>${dnaCellHtml}</td>
           <td>${setupCell}</td>
         </tr>`;
       }).join("");
@@ -1318,8 +1375,10 @@
       const pbEl = document.getElementById("playbookStats");
       const fwEl = document.getElementById("featWeights");
       const cfgEl = document.getElementById("cfgBody");
+      const symEl = document.getElementById("symMlTable");
       if (!ml) { sumEl.textContent = "ML report unavailable."; return; }
       const g = ml.global_model || {};
+      const peb = ml.portfolio_eb_ml_summary || null;
       const wf = ml.wf_portfolio_summary || {};
       const geom = ml.trade_geometry || { tp1_mult: 0.50, tp2_mult: 3.00, tp1_weight: 0.65, runner_sl_r: -0.50 };
       const mlWinCls = (g.ml_oos_win_pct >= 70.0) ? "pos" : "neu";
@@ -1327,14 +1386,26 @@
       const mlPfTxt = g.ml_oos_pf != null ? `PF ${fmt(g.ml_oos_pf, 2)}` : "PF —";
       const gateTxt = g.ml_min_prob ? Number((g.ml_min_prob * 100).toFixed(1)) + "%" : "—";
       const keptTxt = g.kept_fraction != null ? `${Math.round(g.kept_fraction * 100)}% kept` : "—";
+
+      const pebHtml = peb ? `
+        <div style="margin-bottom:10px;padding:10px 12px;border-radius:8px;background:rgba(46,229,157,0.06);border:1px solid rgba(46,229,157,0.28);font-size:0.84rem;">
+          <strong>10-Symbol Dedicated EB-ML Portfolio (${peb.oos_trades} Unseen OOS Trades):</strong>
+          <span class="${peb.ml_oos_win_pct >= 69.5 ? "pos" : "neu"}"><strong>${peb.ml_oos_win_pct}% Win</strong></span> /
+          <span class="${cls(peb.ml_oos_exp_r)}"><strong>${peb.ml_oos_exp_r >= 0 ? "+" : ""}${fmt(peb.ml_oos_exp_r, 4)}R</strong></span>
+          (PF <strong>${fmt(peb.ml_oos_pf, 2)}</strong> vs Base ${peb.base_oos_win_pct}% / ${peb.base_oos_exp_r >= 0 ? "+" : ""}${fmt(peb.base_oos_exp_r, 4)}R)
+          &bull; Unique Models: <strong class="pos">${peb.unique_symbol_models}/${peb.symbols_total}</strong>
+          &bull; Positive Symbols: <strong class="pos">${peb.positive_symbols_count}/${peb.symbols_total}</strong>
+        </div>` : "";
+
       sumEl.innerHTML = `
         <div style="margin-bottom:10px;padding:8px 12px;border-radius:8px;background:#0f1520;border:1px solid var(--border);font-size:0.81rem;">
           <strong>Window:</strong> Rolling ${ml.training_window_days ?? 365}d (${ml.time_decay_half_life_days ?? 120}d half-life) &bull;
           <strong>Rule:</strong> TP1 ${fmt(geom.tp1_mult,2)}R (${Math.round((geom.tp1_weight ?? 0.65)*100)}% + rSL ${fmt(geom.runner_sl_r,2)}R) &rarr; TP2 ${fmt(geom.tp2_mult,2)}R
         </div>
+        ${pebHtml}
         <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:0.85rem;">
-          <div>ML-Filtered OOS: <strong class="${mlWinCls}">${g.ml_oos_win_pct ?? "—"}% Win</strong> / <span class="${cls(g.ml_oos_exp_r)}">${g.ml_oos_exp_r >= 0 ? "+" : ""}${fmt(g.ml_oos_exp_r,4)}R</span> (${mlPfTxt}, ${foldsTxt})</div>
-          <div>ML Samples / Gate: <strong>${g.samples ?? "—"}</strong> (Gate &ge;${gateTxt}, ${keptTxt}, ${g.ml_oos_trades ?? "—"} OOS)</div>
+          <div>Global Prior OOS: <strong class="${mlWinCls}">${g.ml_oos_win_pct ?? "—"}% Win</strong> / <span class="${cls(g.ml_oos_exp_r)}">${g.ml_oos_exp_r >= 0 ? "+" : ""}${fmt(g.ml_oos_exp_r,4)}R</span> (${mlPfTxt}, ${foldsTxt})</div>
+          <div>Global Samples / Gate: <strong>${g.samples ?? "—"}</strong> (Gate &ge;${gateTxt}, ${keptTxt}, ${g.ml_oos_trades ?? "—"} OOS)</div>
           <div>Intraday Base OOS: <strong>${g.base_oos_win_pct ?? "—"}% Win</strong> / <span class="${cls(g.base_oos_exp_r)}">${g.base_oos_exp_r >= 0 ? "+" : ""}${g.base_oos_exp_r ?? "—"}R</span> &bull; AUC <strong>${g.auc_lr ?? "—"}</strong></div>
           <div>WF / Adapt / Def: <strong class="pos">${wf.wf_optimized_count ?? "—"}</strong> / <strong style="color:var(--blue)">${wf.adaptive_ml_gate_count ?? 0}</strong> / <span class="neu">${wf.defensive_filter_count ?? "—"}</span> &bull; Live: <strong>${g.live_feedback_used ?? ml.live_feedback_count ?? 0}</strong></div>
         </div>`;
@@ -1356,7 +1427,7 @@
       const weights = ml.global_feature_weights || {};
       const entries = Object.entries(weights).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
       const maxW = Math.max(0.25, ...entries.map(([, v]) => Math.abs(v)));
-      fwEl.innerHTML = `<div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px;">Standardized Logistic Feature Weights (${entries.length} Features)</div>` +
+      fwEl.innerHTML = `<div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px;">Global Baseline Standardized Logistic Weights (${entries.length} Features)</div>` +
         entries.map(([k, v]) => {
           const pct = Math.min(100, Math.round(Math.abs(v) / maxW * 100));
           const col = v >= 0 ? "var(--green)" : "var(--red)";
@@ -1370,21 +1441,62 @@
       const cfgs = ml.optimized_configs || [];
       cfgEl.innerHTML = cfgs.map(c => {
         const pbsTxt = `${c.EN_SWEEP ? "Sw" : "—"}/${c.EN_SQUEEZE ? "Sq" : "—"}/${c.EN_PULLBACK ? "Pl" : "—"}`;
-        const stCls = c.STATUS === "WF_OPTIMIZED" ? "pill-bull" : (c.STATUS === "ADAPTIVE_ML_GATE" ? "pill-info" : (c.STATUS === "DEFENSIVE_FILTER" ? "pill-warn" : ""));
+        const stStr = String(c.STATUS || "");
+        const stCls = stStr === "WF_OPTIMIZED" ? "pill-bull" : (stStr === "ADAPTIVE_ML_GATE" || stStr.startsWith("CLASS_") ? "pill-info" : (stStr === "DEFENSIVE_FILTER" ? "pill-warn" : ""));
+        const s0 = c.SESS_START_UTC != null ? Number(c.SESS_START_UTC) : 0;
+        const s1 = c.SESS_END_UTC != null ? Number(c.SESS_END_UTC) : 24;
+        const sessTxt = (s0 === 0 && s1 >= 24) ? "24/7" : `${String(s0).padStart(2, "0")}-${String(s1).padStart(2, "0")}Z`;
+        const dnaTxt = c.STRATEGY_TAG || "ALL_24H";
+        const macW = c.MACRO_WEIGHT != null ? fmt(c.MACRO_WEIGHT, 2) : "0.15";
         return `<tr>
           <td><strong>${c.SYMBOL}</strong></td>
           <td>${c.TIMEFRAME}</td>
+          <td style="font-size:0.78rem"><strong>${dnaTxt}</strong> <span class="neu">(${sessTxt})</span></td>
           <td>${c.MIN_SCORE}+</td>
           <td>${c.VWAP_PERIOD}</td>
           <td class="neu" style="font-size:0.78rem">${pbsTxt}</td>
+          <td>${macW}</td>
           <td>${c.TP1_MULT}/${c.TP2_MULT}R</td>
           <td>${fmt(c.OOS_WIN_PCT,1)}%</td>
           <td class="${cls(c.OOS_EXP_R)}">${c.OOS_EXP_R >= 0 ? "+" : ""}${fmt(c.OOS_EXP_R,3)}</td>
           <td>${c.OOS_PF != null ? fmt(c.OOS_PF,2) : "—"}</td>
-          <td>${c.OOS_MAX_DD_R != null ? fmt(c.OOS_MAX_DD_R,2) + "R" : "—"}</td>
-          <td><span class="pill ${stCls}">${c.STATUS}</span></td>
+          <td><span class="pill ${stCls}">${stStr}</span></td>
         </tr>`;
       }).join("");
+
+      if (symEl) {
+        const symMods = ml.symbol_models || {};
+        const symKeys = Object.keys(symMods);
+        if (!symKeys.length) {
+          symEl.innerHTML = `<span class="neu">Per-symbol model breakdown unavailable.</span>`;
+        } else {
+          symEl.innerHTML = `<table><thead><tr><th>Symbol</th><th>Model Type</th><th>Penalty / C</th><th>OOS AUC</th><th>Base &rarr; ML Win%</th><th>Base &rarr; ML Exp(R)</th><th>PF</th><th>Folds / OOS N</th><th>ML Gate</th><th>Top 3 Feature Drivers</th></tr></thead><tbody>` +
+            symKeys.map(sym => {
+              const m = symMods[sym] || {};
+              const mTag = m.model_tag || "GLOBAL";
+              const tagCls = mTag === "SYM_PURE" ? "pill-bull" : (mTag.startsWith("SYM_EB") ? "pill-info" : "pill-warn");
+              const penTxt = m.pen ? `${String(m.pen).toUpperCase()}(${m.best_c})` : "—";
+              const aucTxt = m.auc_lr != null ? Number(m.auc_lr).toFixed(3) : "—";
+              const topFeats = Array.isArray(m.top_features) && m.top_features.length
+                ? m.top_features.slice(0, 3).map(f => `<span class="${cls(f.weight)}" style="font-family:monospace;font-size:0.77rem">${f.name}(${f.weight >= 0 ? "+" : ""}${f.weight.toFixed(2)})</span>`).join(", ")
+                : `<span class="neu">—</span>`;
+              const fTxt = (m.ml_pos_folds != null && m.ml_eval_folds != null) ? `${m.ml_pos_folds}/${m.ml_eval_folds} (n=${m.ml_oos_trades ?? "—"})` : "—";
+              const gTxt = m.ml_min_prob != null ? `&ge;${(m.ml_min_prob * 100).toFixed(1)}%` : "—";
+              return `<tr>
+                <td><strong>${sym}</strong></td>
+                <td><span class="pill ${tagCls}">${mTag}</span></td>
+                <td class="neu">${penTxt}</td>
+                <td>${aucTxt}</td>
+                <td>${fmt(m.base_oos_win_pct,1)}% &rarr; <strong class="${m.ml_oos_win_pct >= 70 ? "pos" : "neu"}">${fmt(m.ml_oos_win_pct,1)}%</strong></td>
+                <td><span class="${cls(m.base_oos_exp_r)}">${m.base_oos_exp_r >= 0 ? "+" : ""}${fmt(m.base_oos_exp_r,3)}R</span> &rarr; <strong class="${cls(m.ml_oos_exp_r)}">${m.ml_oos_exp_r >= 0 ? "+" : ""}${fmt(m.ml_oos_exp_r,4)}R</strong></td>
+                <td><strong>${fmt(m.ml_oos_pf,2)}</strong></td>
+                <td class="neu">${fTxt}</td>
+                <td>${gTxt}</td>
+                <td>${topFeats}</td>
+              </tr>`;
+            }).join("") + `</tbody></table>`;
+        }
+      }
     }
 
     function renderEvolutionAndLedger(signals, ml, evo) {

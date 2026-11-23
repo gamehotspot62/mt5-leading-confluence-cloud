@@ -67,7 +67,28 @@ def _load_optimized_configs() -> Dict[Tuple[str, str], Dict[str, Any]]:
             "ml_min_prob": float(parts[10]),
             "oos_exp_r": float(parts[12]) if len(parts) >= 13 else 0.0,
             "status": parts[13] if len(parts) >= 14 else "",
+            "sess_start_utc": int(float(parts[14])) if len(parts) >= 15 else 0,
+            "sess_end_utc": int(float(parts[15])) if len(parts) >= 16 else 24,
+            "htf_mode": int(float(parts[16])) if len(parts) >= 17 else 0,
+            "macro_weight": float(parts[17]) if len(parts) >= 18 else 0.15,
+            "cooldown_bars": int(float(parts[18])) if len(parts) >= 19 else 4,
+            "strategy_tag": parts[19] if len(parts) >= 20 else "ALL_24H",
         }
+    return out
+
+
+def _load_symbol_ml_tags() -> Dict[str, str]:
+    path = DATA_DIR / "ml_report.json"
+    out: Dict[str, str] = {}
+    if not path.exists():
+        return out
+    try:
+        rep = json.loads(path.read_text(encoding="utf-8"))
+        for sym, info in (rep.get("symbol_models") or {}).items():
+            if isinstance(info, dict) and info.get("model_tag"):
+                out[sym.upper()] = str(info["model_tag"])
+    except Exception:
+        pass
     return out
 
 
@@ -441,14 +462,15 @@ def _send_notifications(new_alerts: List[Dict[str, Any]]) -> None:
     tg_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     discord_url = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 
-    lines = ["*LeadingConfluencePro v3.6 — Confirmed Live Signals*"]
+    lines = ["*LeadingConfluencePro v4.0 — Confirmed Live Signals*"]
     for a in new_alerts:
         prob_txt = f" | ML {a['ml_prob']*100:.0f}%" if a.get("ml_prob") is not None else ""
         grade_txt = f" [{a.get('grade', 'B')}]"
+        dna_txt = f" | DNA `{a.get('strategy_tag', 'ALL_24H')}`" if a.get("strategy_tag") else ""
         risk_txt = f" | Risk: `{a.get('suggested_risk_pct', 0.50):.2f}%`" if a.get("suggested_risk_pct") is not None else ""
         lines.append(
             f"• *{a['symbol']} {a['timeframe']}* `{a['direction']}` ({a['playbook']}){grade_txt} "
-            f"| Score `{a['score']}/100`{prob_txt} | Macro `{a['macro_bias']:+d}`{risk_txt}\n"
+            f"| Score `{a['score']}/100`{prob_txt}{dna_txt} | Macro `{a['macro_bias']:+d}`{risk_txt}\n"
             f"  Entry: `{a['entry']:.5g}` | SL: `{a['sl']:.5g}` ({a.get('sl_dist_pct', 0):.2f}%) | TP1(65%+rSL): `{a['tp1']:.5g}` | TP2: `{a['tp2']:.5g}`"
         )
     text_msg = "\n".join(lines)
@@ -484,6 +506,7 @@ def run_live_scan() -> Dict[str, Any]:
     macro_map = _load_macro_bias_map()
     cfg_map = _load_optimized_configs()
     ml_map = _load_ml_weights()
+    ml_tag_map = _load_symbol_ml_tags()
 
     state_file = DATA_DIR / "alert_state.json"
     sent_keys: List[str] = []
@@ -530,7 +553,9 @@ def run_live_scan() -> Dict[str, Any]:
         df_1h = _trim_to_closed_bars(_resample_1h(df_15m), 60, now_dt)
 
         macro_val, macro_note = macro_map.get(sym, macro_map.get("GLOBAL", (0, "Neutral")))
-        ml_model = ml_map.get(sym, ml_map.get("GLOBAL"))
+        class_key = f"CLASS_{str(meta['asset_class']).upper()}"
+        ml_model = ml_map.get(sym, ml_map.get(class_key, ml_map.get("GLOBAL")))
+        ml_model_tag = ml_tag_map.get(sym, "GLOBAL")
 
         for tf_name, tf_df, base_tf in [("M15", df_15m, "15m"), ("H1", df_1h, "1h")]:
             if len(tf_df) < 90:
@@ -541,13 +566,18 @@ def run_live_scan() -> Dict[str, Any]:
 
             cfg = cfg_map.get(
                 (sym, tf_name),
-                cfg_map.get((sym, "M15"), cfg_map.get((sym, "H1"), cfg_map.get(("GLOBAL", "ALL"), {}))),
+                cfg_map.get((sym, "ALL"), cfg_map.get((class_key, "ALL"), cfg_map.get(("GLOBAL", "ALL"), {}))),
             )
+            s0 = int(cfg.get("sess_start_utc", 0))
+            s1 = int(cfg.get("sess_end_utc", 24))
+            sess_label = "24/7" if (s0 == 0 and s1 >= 24) else f"{s0:02d}-{s1:02d}Z"
+            strategy_tag = str(cfg.get("strategy_tag", "ALL_24H"))
+            macro_w = float(cfg.get("macro_weight", 0.15))
             params = EngineParams(
                 min_score=int(cfg.get("min_score", 65)),
                 vwap_period=int(cfg.get("vwap_period", 50)),
                 sl_buffer_atr=float(cfg.get("sl_buffer_atr", 0.25)),
-                cooldown_bars=4,
+                cooldown_bars=int(cfg.get("cooldown_bars", 4)),
                 allow_consecutive=True,
                 min_sl_atr=1.10,
                 tp1_mult=float(cfg.get("tp1_mult", 0.50)),
@@ -555,6 +585,10 @@ def run_live_scan() -> Dict[str, Any]:
                 en_sweep=bool(cfg.get("en_sweep", True)),
                 en_squeeze=bool(cfg.get("en_squeeze", True)),
                 en_pullback=bool(cfg.get("en_pullback", True)),
+                sess_start_utc=s0,
+                sess_end_utc=s1,
+                htf_mode=int(cfg.get("htf_mode", 0)),
+                macro_weight=macro_w,
             )
             oos_exp_r = float(cfg.get("oos_exp_r", 0.0))
             wf_status = str(cfg.get("status", "GLOBAL_MODEL"))
@@ -566,7 +600,7 @@ def run_live_scan() -> Dict[str, Any]:
                 params,
                 base_tf=base_tf,
                 macro_bias_arr=macro_arr,
-                use_macro_score=True,
+                use_macro_score=(macro_w > 0.0),
                 include_last_bar=True,
             )
 
@@ -612,6 +646,10 @@ def run_live_scan() -> Dict[str, Any]:
                     "grade": grade,
                     "suggested_risk_pct": sug_risk,
                     "wf_status": wf_status,
+                    "strategy_tag": strategy_tag,
+                    "sess_window": sess_label,
+                    "macro_weight": round(macro_w, 2),
+                    "ml_model_tag": ml_model_tag,
                     "score": int(cand["score"]),
                     "ml_prob": round(prob, 3) if prob is not None else None,
                     "macro_bias": int(macro_val),
@@ -694,6 +732,10 @@ def run_live_scan() -> Dict[str, Any]:
                         "sqz_on": int(st["sqz_on"][last_closed_idx]),
                         "htf_bias": int(st["htf_bias"][last_closed_idx]),
                         "min_score": params.min_score,
+                        "strategy_tag": strategy_tag,
+                        "sess_window": sess_label,
+                        "macro_weight": round(macro_w, 2),
+                        "ml_model_tag": ml_model_tag,
                         "ml_min_prob": round(ml_thresh, 3),
                         "ml_buy_prob": p_buy,
                         "ml_sell_prob": p_sell,

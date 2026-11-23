@@ -65,6 +65,18 @@ class EngineParams:
     tp1_mult: float = 0.50
     tp2_mult: float = 3.00
     macro_hard_veto: bool = False
+    sess_start_utc: int = 0
+    sess_end_utc: int = 24
+    htf_mode: int = 0        # 0=Balanced, 1=StrictTrend, 2=FlexSweep
+    macro_weight: float = 0.15
+
+
+def in_utc_session(hour_utc: int, sess_start: int, sess_end: int) -> bool:
+    if sess_start == 0 and sess_end >= 24:
+        return True
+    if sess_start < sess_end:
+        return sess_start <= hour_utc < sess_end
+    return hour_utc >= sess_start or hour_utc < sess_end
 
 
 def resample_htf(df: pd.DataFrame, tf: str) -> Tuple[pd.DataFrame, int]:
@@ -328,6 +340,8 @@ def compute_indicators_and_candidates(
     last_sig_dir = 0
     buy_reset = 1
     sell_reset = 1
+    bar_hours = pd.to_datetime(times, utc=True).hour
+    sess_all = (params.sess_start_utc == 0 and params.sess_end_utc >= 24)
 
     eval_end = n if include_last_bar else max(1, n - 1)
     for i in range(1, eval_end):
@@ -337,6 +351,9 @@ def compute_indicators_and_candidates(
             sell_reset = 1
 
         if i < warmup:
+            continue
+
+        if not sess_all and not in_utc_session(int(bar_hours[i]), params.sess_start_utc, params.sess_end_utc):
             continue
 
         at = atr[i]
@@ -429,13 +446,14 @@ def compute_indicators_and_candidates(
             if trend_sup and touched and held and conf_c and ofi[i] >= 0.20 and rvol[i] >= 1.00 and z <= 1.8:
                 trig_b_pl = True
 
-        # Standalone Sweep allowed only when HTF is balanced (0) AND institutional QualitySweep (risk>=1.45 ATR & body<=0.90 ATR),
+        # Standalone Sweep allowed per Symbol DNA htf_mode (0=Balanced, 1=StrictTrend, 2=FlexSweep) AND QualitySweep,
         # OR in confluence with SqzBreak/VWAPPull
         body_atr_i = abs(body) / max(at, 1e-9)
         b_sw_raw_risk = abs(c[i] - (b_sw_ext - params.sl_buffer_atr * at))
         b_sw_risk_atr = max(params.min_sl_atr, min(params.max_sl_atr, b_sw_raw_risk / max(at, 1e-9)))
         b_qual_sw = (b_sw_risk_atr >= 1.45) and (body_atr_i <= 0.90)
-        trig_b_sw = raw_b_sw and (trig_b_sq or trig_b_pl or ((not params.use_htf or htf_b == 0) and b_qual_sw))
+        b_sw_htf_ok = (not params.use_htf) or (True if params.htf_mode == 2 else ((htf_b == 1) if params.htf_mode == 1 else (htf_b == 0)))
+        trig_b_sw = raw_b_sw and (trig_b_sq or trig_b_pl or (b_sw_htf_ok and b_qual_sw))
         b_exts = []
         if trig_b_sw:
             b_exts.append(b_sw_ext)
@@ -498,7 +516,8 @@ def compute_indicators_and_candidates(
         s_sw_raw_risk = abs((s_sw_ext + params.sl_buffer_atr * at) - c[i])
         s_sw_risk_atr = max(params.min_sl_atr, min(params.max_sl_atr, s_sw_raw_risk / max(at, 1e-9)))
         s_qual_sw = (s_sw_risk_atr >= 1.45) and (body_atr_i <= 0.90)
-        trig_s_sw = raw_s_sw and (trig_s_sq or trig_s_pl or ((not params.use_htf or htf_b == 0) and s_qual_sw))
+        s_sw_htf_ok = (not params.use_htf) or (True if params.htf_mode == 2 else ((htf_b == -1) if params.htf_mode == 1 else (htf_b == 0)))
+        trig_s_sw = raw_s_sw and (trig_s_sq or trig_s_pl or (s_sw_htf_ok and s_qual_sw))
         s_exts = []
         if trig_s_sw:
             s_exts.append(s_sw_ext)
@@ -546,8 +565,8 @@ def compute_indicators_and_candidates(
             if use_macro_score:
                 if params.macro_hard_veto and mb <= -50.0:
                     b_score = 0
-                else:
-                    b_score += int(round(0.15 * mb))
+                elif params.macro_weight > 0.0:
+                    b_score += int(round(params.macro_weight * mb))
             b_score = max(0, min(100, b_score))
 
         # Bear Score
@@ -589,8 +608,8 @@ def compute_indicators_and_candidates(
             if use_macro_score:
                 if params.macro_hard_veto and mb >= 50.0:
                     s_score = 0
-                else:
-                    s_score -= int(round(0.15 * mb))
+                elif params.macro_weight > 0.0:
+                    s_score -= int(round(params.macro_weight * mb))
             s_score = max(0, min(100, s_score))
 
         allow_buy = params.allow_consecutive or (last_sig_dir != 1) or (buy_reset == 1)

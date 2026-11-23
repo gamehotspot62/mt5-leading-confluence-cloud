@@ -7,14 +7,13 @@
 //+------------------------------------------------------------------+
 #property copyright "LeadingConfluencePro Quantitative Architecture"
 #property link      "https://github.com/gamehotspot62/mt5-leading-confluence-cloud"
-#property version   "3.60"
-#property description "Universal non-repainting leading confluence indicator v3.60:"
-#property description "1) BVC + CLV Order Flow Delta & CVD Divergence (microstructure)"
-#property description "2) Wyckoff Liquidity Sweep / SFP Reversal (behavioral stop hunts)"
-#property description "3) Bollinger-Keltner Volatility Squeeze & OLS Momentum"
-#property description "4) Adaptive VWAP Fair Value Bands + VSA Relative Volume + FVG/Disp"
-#property description "5) Kaufman Efficiency Ratio Regime, ATR Percentile & Causal MTF"
-#property description "6) 24/7 Cloud Macro/On-Chain/ETF/COT Bias, Adaptive Params & ML Filter"
+#property version   "4.00"
+#property description "Universal non-repainting auto-symbol adaptive indicator v4.00:"
+#property description "1) Auto-Detects Chart Symbol & Asset Class -> Unique Strategy DNA & Data"
+#property description "2) BVC + CLV Order Flow Delta & CVD Divergence (microstructure)"
+#property description "3) Liquidity Sweep / SFP, Volatility Squeeze & Adaptive VWAP Pullback"
+#property description "4) Causal HTF Alignment, UTC Session Window & Symbol Macro Weight"
+#property description "5) Dedicated 18-Feature Empirical-Bayes Per-Symbol ML Meta-Filter"
 
 #property indicator_chart_window
 #property indicator_buffers 11
@@ -200,7 +199,7 @@ int    g_buyReset[];
 int    g_sellReset[];
 int    g_sigPlaybook[];
 
-//--- Effective Runtime Parameters (Overridden by Cloud Adaptive Config when enabled & matched)
+//--- Effective Runtime Parameters (Overridden by Cloud Symbol-DNA Config when enabled & matched)
 int    g_effMinScore       = 65;
 int    g_effVWAPPeriod     = 50;
 double g_effSLBufferATR    = 0.25;
@@ -210,6 +209,13 @@ bool   g_effEnSweep        = true;
 bool   g_effEnSqueeze      = true;
 bool   g_effEnPullback     = true;
 double g_effMLMinProb      = 0.65;
+int    g_effSessStartUTC   = 0;
+int    g_effSessEndUTC     = 24;
+int    g_effHTFMode        = 0;        // 0=Balanced, 1=StrictTrend, 2=FlexSweep
+double g_effMacroWeight    = 0.15;
+int    g_effCooldownBars   = 4;
+string g_effStrategyTag    = "ALL_24H";
+string g_detectedClass     = "GLOBAL";
 bool   g_cloudConfigLoaded = false;
 string g_cloudConfigSource = "Manual";
 bool   g_cloudConfigDirty  = false;
@@ -471,19 +477,81 @@ string NormalizeSymbolKey(const string sym)
    // Map common broker aliases & substrings to canonical cloud universe keys
    if(StringFind(upper, "XAUUSD") >= 0 || StringFind(upper, "GOLD") >= 0)   return "XAUUSD";
    if(StringFind(upper, "XAGUSD") >= 0 || StringFind(upper, "SILVER") >= 0) return "XAGUSD";
-   if(StringFind(upper, "BTCUSD") >= 0 || upper == "BITCOIN")               return "BTCUSD";
-   if(StringFind(upper, "ETHUSD") >= 0 || upper == "ETHEREUM")              return "ETHUSD";
+   if(StringFind(upper, "BTCUSD") >= 0 || StringFind(upper, "BTCUSDT") >= 0 ||
+      upper == "BITCOIN")                                                   return "BTCUSD";
+   if(StringFind(upper, "ETHUSD") >= 0 || StringFind(upper, "ETHUSDT") >= 0 ||
+      upper == "ETHEREUM")                                                  return "ETHUSD";
    if(StringFind(upper, "EURUSD") >= 0)                                     return "EURUSD";
    if(StringFind(upper, "GBPUSD") >= 0)                                     return "GBPUSD";
    if(StringFind(upper, "USDJPY") >= 0)                                     return "USDJPY";
    if(StringFind(upper, "WTI") >= 0 || StringFind(upper, "XTIUSD") >= 0 ||
-      StringFind(upper, "USOUSD") >= 0 || upper == "CL" || upper == "USOIL") return "USOIL";
+      StringFind(upper, "XBRUSD") >= 0 || StringFind(upper, "UKOIL") >= 0 ||
+      StringFind(upper, "BRENT") >= 0 || StringFind(upper, "USOUSD") >= 0 ||
+      upper == "CL" || StringFind(upper, "USOIL") >= 0)                     return "USOIL";
    if(StringFind(upper, "USTEC") >= 0 || StringFind(upper, "NAS100") >= 0 ||
-      StringFind(upper, "NDX") >= 0 || StringFind(upper, "US100") >= 0)    return "US100";
+      StringFind(upper, "NQ100") >= 0 || upper == "NQ" ||
+      StringFind(upper, "NDX") >= 0 || StringFind(upper, "US100") >= 0)     return "US100";
    if(StringFind(upper, "SPX500") >= 0 || StringFind(upper, "SP500") >= 0 ||
-      StringFind(upper, "US500") >= 0)                                     return "US500";
+      upper == "ES" || upper == "SPX" || StringFind(upper, "US500") >= 0)   return "US500";
 
    return upper;
+}
+
+//+------------------------------------------------------------------+
+//| Helper: Auto-Detect Asset Class for Any Chart Symbol             |
+//+------------------------------------------------------------------+
+string DetectAssetClassKey(const string sym, const string normSym)
+{
+   string u = normSym;
+   StringToUpper(u);
+
+   if(StringFind(u, "XAU") >= 0 || StringFind(u, "XAG") >= 0 ||
+      StringFind(u, "GOLD") >= 0 || StringFind(u, "SILVER") >= 0 ||
+      StringFind(u, "XPT") >= 0 || StringFind(u, "XPD") >= 0 ||
+      StringFind(u, "PLATINUM") >= 0 || StringFind(u, "COPPER") >= 0)
+      return "CLASS_METALS";
+
+   if(StringFind(u, "BTC") >= 0 || StringFind(u, "ETH") >= 0 ||
+      StringFind(u, "SOL") >= 0 || StringFind(u, "XRP") >= 0 ||
+      StringFind(u, "LTC") >= 0 || StringFind(u, "ADA") >= 0 ||
+      StringFind(u, "DOGE") >= 0 || StringFind(u, "BNB") >= 0 ||
+      StringFind(u, "AVAX") >= 0 || StringFind(u, "CRYPTO") >= 0)
+      return "CLASS_CRYPTO";
+
+   if(StringFind(u, "OIL") >= 0 || StringFind(u, "WTI") >= 0 ||
+      StringFind(u, "BRENT") >= 0 || StringFind(u, "NGAS") >= 0 ||
+      StringFind(u, "XTI") >= 0 || StringFind(u, "XBR") >= 0 || u == "CL")
+      return "CLASS_ENERGY";
+
+   if(StringFind(u, "US500") >= 0 || StringFind(u, "US100") >= 0 ||
+      StringFind(u, "US30") >= 0 || StringFind(u, "SPX") >= 0 ||
+      StringFind(u, "SP500") >= 0 || StringFind(u, "NDX") >= 0 ||
+      StringFind(u, "NAS") >= 0 || StringFind(u, "USTEC") >= 0 ||
+      StringFind(u, "DJ30") >= 0 || StringFind(u, "WS30") >= 0 ||
+      StringFind(u, "DOW") >= 0 || StringFind(u, "GER") >= 0 ||
+      StringFind(u, "DE40") >= 0 || StringFind(u, "DAX") >= 0 ||
+      StringFind(u, "UK100") >= 0 || StringFind(u, "FTSE") >= 0 ||
+      StringFind(u, "JP225") >= 0 || StringFind(u, "NI225") >= 0 ||
+      StringFind(u, "FRA40") >= 0 || StringFind(u, "AUS200") >= 0 ||
+      StringFind(u, "HK50") >= 0)
+      return "CLASS_INDEX";
+
+   string fxCcy[8] = {"EUR", "GBP", "USD", "JPY", "CHF", "AUD", "NZD", "CAD"};
+   int ccyHits = 0;
+   for(int c = 0; c < 8; c++)
+      if(StringFind(u, fxCcy[c]) >= 0) ccyHits++;
+   if(ccyHits >= 2)
+      return "CLASS_FX";
+
+   string symPath = SymbolInfoString(sym, SYMBOL_PATH);
+   StringToUpper(symPath);
+   if(StringFind(symPath, "CRYPTO") >= 0) return "CLASS_CRYPTO";
+   if(StringFind(symPath, "METAL") >= 0)  return "CLASS_METALS";
+   if(StringFind(symPath, "ENERGY") >= 0 || StringFind(symPath, "OIL") >= 0) return "CLASS_ENERGY";
+   if(StringFind(symPath, "IND") >= 0 || StringFind(symPath, "EQUIT") >= 0)  return "CLASS_INDEX";
+   if(StringFind(symPath, "FOREX") >= 0 || StringFind(symPath, "FX") >= 0)    return "CLASS_FX";
+
+   return "GLOBAL";
 }
 
 //+------------------------------------------------------------------+
@@ -630,6 +698,12 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
    bool   prevSq       = g_effEnSqueeze;
    bool   prevPl       = g_effEnPullback;
    double prevMLProb    = g_effMLMinProb;
+   int    prevSess0     = g_effSessStartUTC;
+   int    prevSess1     = g_effSessEndUTC;
+   int    prevHTFM      = g_effHTFMode;
+   double prevMacW      = g_effMacroWeight;
+   int    prevCD        = g_effCooldownBars;
+   string prevTag       = g_effStrategyTag;
    bool   prevMLLoaded  = g_mlLoaded;
    int    prevMLFCount  = g_mlFeatCount;
    double prevMLInt     = g_mlIntercept;
@@ -645,19 +719,26 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
    g_effEnSqueeze  = InpEnableSqueezePlaybook;
    g_effEnPullback = InpEnableVWAPPullbackPlaybook;
    g_effMLMinProb  = 0.65;
+   g_effSessStartUTC = 0;
+   g_effSessEndUTC   = 24;
+   g_effHTFMode      = 0;
+   g_effMacroWeight  = 0.15;
+   g_effCooldownBars = MathMax(1, InpMinBarsBetweenSignals);
+   g_effStrategyTag  = "ALL_24H";
    g_cloudConfigLoaded = false;
    g_cloudConfigSource = "Manual";
 
    string symUpper = _Symbol;
    StringToUpper(symUpper);
    string normSym  = NormalizeSymbolKey(_Symbol);
+   g_detectedClass = DetectAssetClassKey(_Symbol, normSym);
    string tfStr    = EnumToString(_Period);
    StringReplace(tfStr, "PERIOD_", "");
    StringToUpper(tfStr);
 
    int commonFlag = InpUseCommonFiles ? FILE_COMMON : 0;
 
-   // 1) Read OptimizedConfig.csv (priority: EXACT/TF -> NORM/TF -> NORM/ALL -> GLOBAL/ALL)
+   // 1) Read OptimizedConfig.csv (priority: EXACT/TF -> NORM/TF -> NORM/ALL -> CLASS/TF -> CLASS/ALL -> GLOBAL/ALL)
    bool cfgHadMLProb = false;
    if(InpUseCloudAdaptiveSettings && StringLen(InpOptConfigCSVFile) > 0 && FileIsExist(InpOptConfigCSVFile, commonFlag))
    {
@@ -674,6 +755,12 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
          bool   bSq       = g_effEnSqueeze;
          bool   bPl       = g_effEnPullback;
          double bMLProb   = 0.50;
+         int    bSess0    = 0;
+         int    bSess1    = 24;
+         int    bHTFMode  = 0;
+         double bMacW     = 0.15;
+         int    bCD       = MathMax(1, InpMinBarsBetweenSignals);
+         string bTag      = "ALL_24H";
          string bSrc      = "Manual";
 
          while(!FileIsEnding(fh))
@@ -702,10 +789,12 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
 
             int rank = 99;
             string srcLabel = "";
-            if(p[0] == symUpper && p[1] == tfStr)      { rank = 1; srcLabel = symUpper + "/" + tfStr; }
-            else if(p[0] == normSym && p[1] == tfStr)  { rank = 2; srcLabel = normSym + "/" + tfStr; }
-            else if(p[0] == normSym && p[1] == "ALL")  { rank = 3; srcLabel = normSym + "/ALL"; }
-            else if(p[0] == "GLOBAL" && p[1] == "ALL") { rank = 4; srcLabel = "GLOBAL"; }
+            if(p[0] == symUpper && p[1] == tfStr)               { rank = 1; srcLabel = symUpper + "/" + tfStr; }
+            else if(p[0] == normSym && p[1] == tfStr)           { rank = 2; srcLabel = normSym + "/" + tfStr; }
+            else if(p[0] == normSym && p[1] == "ALL")           { rank = 3; srcLabel = normSym + "/ALL"; }
+            else if(p[0] == g_detectedClass && p[1] == tfStr)   { rank = 4; srcLabel = g_detectedClass + "/" + tfStr; }
+            else if(p[0] == g_detectedClass && p[1] == "ALL")   { rank = 5; srcLabel = g_detectedClass; }
+            else if(p[0] == "GLOBAL" && p[1] == "ALL")          { rank = 6; srcLabel = "GLOBAL"; }
 
             if(rank < bestRank)
             {
@@ -719,6 +808,20 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
                bSq       = (StringToInteger(p[8]) != 0);
                bPl       = (StringToInteger(p[9]) != 0);
                bMLProb   = MathMax(0.05, MathMin(0.95, StringToDouble(p[10])));
+               if(cnt >= 20)
+               {
+                  bSess0   = (_Period < PERIOD_D1) ? MathMax(0, MathMin(23, (int)StringToInteger(p[14]))) : 0;
+                  bSess1   = (_Period < PERIOD_D1) ? MathMax(1, MathMin(24, (int)StringToInteger(p[15]))) : 24;
+                  bHTFMode = MathMax(0, MathMin(2, (int)StringToInteger(p[16])));
+                  bMacW    = MathMax(0.0, MathMin(0.50, StringToDouble(p[17])));
+                  bCD      = MathMax(1, MathMin(20, (int)StringToInteger(p[18])));
+                  bTag     = p[19];
+               }
+               else
+               {
+                  bSess0 = 0; bSess1 = 24; bHTFMode = 0; bMacW = 0.15;
+                  bCD = MathMax(1, InpMinBarsBetweenSignals); bTag = "ALL_24H";
+               }
                bSrc      = srcLabel;
             }
          }
@@ -735,6 +838,12 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
             g_effEnSqueeze      = bSq;
             g_effEnPullback     = bPl;
             g_effMLMinProb      = bMLProb;
+            g_effSessStartUTC   = bSess0;
+            g_effSessEndUTC     = bSess1;
+            g_effHTFMode        = bHTFMode;
+            g_effMacroWeight    = bMacW;
+            g_effCooldownBars   = bCD;
+            g_effStrategyTag    = bTag;
             g_cloudConfigLoaded = true;
             g_cloudConfigSource = bSrc;
             cfgHadMLProb        = true;
@@ -742,7 +851,7 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
       }
    }
 
-   // 2) Read MLModelWeights.csv (priority: EXACT -> NORM -> GLOBAL, supports 18-feature v3.50 & 10-feature legacy)
+   // 2) Read MLModelWeights.csv (priority: EXACT -> NORM -> CLASS -> GLOBAL, supports 18-feature v4.0 & 10-feature legacy)
    g_mlLoaded    = false;
    g_mlModelSym  = "OFF";
    g_mlFeatCount = 18;
@@ -777,9 +886,10 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
                continue;
 
             int rank = 99;
-            if(p[0] == symUpper)      rank = 1;
-            else if(p[0] == normSym)  rank = 2;
-            else if(p[0] == "GLOBAL") rank = 3;
+            if(p[0] == symUpper)            rank = 1;
+            else if(p[0] == normSym)        rank = 2;
+            else if(p[0] == g_detectedClass)rank = 3;
+            else if(p[0] == "GLOBAL")       rank = 4;
 
             if(rank < bestRank)
             {
@@ -816,6 +926,12 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
          prevSw       != g_effEnSweep ||
          prevSq       != g_effEnSqueeze ||
          prevPl       != g_effEnPullback ||
+         prevSess0    != g_effSessStartUTC ||
+         prevSess1    != g_effSessEndUTC ||
+         prevHTFM     != g_effHTFMode ||
+         MathAbs(prevMacW - g_effMacroWeight) > 1e-6 ||
+         prevCD       != g_effCooldownBars ||
+         prevTag      != g_effStrategyTag ||
          prevMLLoaded != g_mlLoaded ||
          prevMLFCount != g_mlFeatCount ||
          MathAbs(prevMLProb - g_effMLMinProb) > 1e-6 ||
@@ -828,9 +944,9 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
 }
 
 //+------------------------------------------------------------------+
-//| Helper: Check London/NY UTC Session Window (07..20 UTC)          |
+//| Helpers: Bar UTC Hour & Symbol Session Window Check              |
 //+------------------------------------------------------------------+
-double IsLondonNYSessionUTC(const datetime barTime)
+int GetBarUTCHour(const datetime barTime)
 {
    datetime tc = TimeCurrent();
    datetime tg = TimeGMT();
@@ -846,7 +962,22 @@ double IsLondonNYSessionUTC(const datetime barTime)
    }
    MqlDateTime dt;
    TimeToStruct(barUtc, dt);
-   return (dt.hour >= 7 && dt.hour <= 20) ? 1.0 : 0.0;
+   return dt.hour;
+}
+
+bool IsInSessionUTC(const int hr, const int s0, const int s1)
+{
+   if(s0 == 0 && s1 >= 24)
+      return true;
+   if(s0 < s1)
+      return (hr >= s0 && hr < s1);
+   return (hr >= s0 || hr < s1);
+}
+
+double IsLondonNYSessionUTC(const datetime barTime)
+{
+   int hr = GetBarUTCHour(barTime);
+   return (hr >= 7 && hr <= 20) ? 1.0 : 0.0;
 }
 
 //+------------------------------------------------------------------+
@@ -1278,7 +1409,7 @@ void UpdateVisualsAndStats(const int rates_total,
    if(!InpShowDashboard)
       return;
 
-   int panelW = 670;
+   int panelW = 710;
    int rowCount = 7 + (InpUseExternalMacroBias ? 1 : 0);
    int panelH = 22 + rowCount * 17;
 
@@ -1303,30 +1434,25 @@ void UpdateVisualsAndStats(const int rates_total,
    int yTxt = InpDashY + 8;
    int dy   = 17;
 
-   // Row 1: Title
+   // Row 1: Title + Detected Symbol/Class + Profile
    string tfName = EnumToString(_Period);
    StringReplace(tfName, "PERIOD_", "");
-   string titleStr = StringFormat("LEADING CONFLUENCE PRO v3.60 [%s %s] | 1Y Auto-ML [%s] (TP1 65%%+rSL-0.5R)", _Symbol, tfName, GetProfileName());
+   string titleStr = StringFormat("LEADING CONFLUENCE PRO v4.00 [%s %s | %s] | Symbol-DNA [%s]", _Symbol, tfName, g_detectedClass, GetProfileName());
    SetDashLabel(g_prefix + "R1", titleStr, xTxt, yTxt, clrWhite, 9);
    yTxt += dy;
 
-   // Row 2: Active Gates + Volume Source + VWAP
-   string volMode = "Tick";
-   if(InpVolumeSource == VOL_REAL)
-      volMode = "Real";
-   else if(InpVolumeSource == VOL_AUTO && realVol[lastClosed] > 0)
-      volMode = "Real(Auto)";
-   else if(InpVolumeSource == VOL_AUTO)
-      volMode = "Tick(Auto)";
-
-   string row2 = StringFormat("Gate: %d+ (%s) | VWAP: %s(%d) | R:R 1:%.2f / 1:%.2f | Vol: %s",
+   // Row 2: Symbol DNA Playbooks, Session Window, Gate, VWAP, Cooldown & Macro Weight
+   string sessTxt = (g_effSessStartUTC == 0 && g_effSessEndUTC >= 24) ? "24/7" : StringFormat("%02d-%02dZ", g_effSessStartUTC, g_effSessEndUTC);
+   string row2 = StringFormat("DNA: %s (%s/%s/%s) | Sess %s | Gate %d+ | VWAP(%d) | CD:%d | MacW:%.2f",
+                              g_effStrategyTag,
+                              g_effEnSweep ? "Sw" : "-",
+                              g_effEnSqueeze ? "Sq" : "-",
+                              g_effEnPullback ? "Pl" : "-",
+                              sessTxt,
                               g_effMinScore,
-                              g_cloudConfigLoaded ? "Cloud" : "Manual",
-                              (InpVWAPMode == VWAP_ROLLING) ? "Roll" : "Sess",
                               g_effVWAPPeriod,
-                              g_effTP1Mult,
-                              g_effTP2Mult,
-                              volMode);
+                              g_effCooldownBars,
+                              g_effMacroWeight);
    SetDashLabel(g_prefix + "R2", row2, xTxt, yTxt, clrLightSteelBlue, 9);
    yTxt += dy;
 
@@ -1499,7 +1625,7 @@ int OnInit()
 
    IndicatorSetInteger(INDICATOR_DIGITS, _Digits);
    IndicatorSetString(INDICATOR_SHORTNAME,
-                      StringFormat("LeadingConfluencePro v3.6 (%d+)", g_effMinScore));
+                      StringFormat("LeadingConfluencePro v4.0 [%s] (%d+)", g_effStrategyTag, g_effMinScore));
 
    return INIT_SUCCEEDED;
 }
@@ -1952,6 +2078,10 @@ int OnCalculate(const int rates_total,
       if(i < g_calcStart + warmup)
          continue;
 
+      if(!(g_effSessStartUTC == 0 && g_effSessEndUTC >= 24) &&
+         !IsInSessionUTC(GetBarUTCHour(time[i]), g_effSessStartUTC, g_effSessEndUTC))
+         continue;
+
       double atr = g_atr[i];
       double barRange = high[i] - low[i];
       if(atr <= _Point * 2.0 || barRange < 0.25 * atr)
@@ -1963,7 +2093,8 @@ int OnCalculate(const int rates_total,
       if(g_atrPct[i] < 8.0 && !recentSqz)
          continue;
 
-      if((i - g_lastSigBar[i - 1]) < InpMinBarsBetweenSignals)
+      int effCooldown = g_cloudConfigLoaded ? g_effCooldownBars : InpMinBarsBetweenSignals;
+      if((i - g_lastSigBar[i - 1]) < effCooldown)
          continue;
 
       double clv = (barRange > _Point * 0.1) ? (((close[i] - low[i]) - (high[i] - close[i])) / barRange) : 0.0;
@@ -2057,13 +2188,15 @@ int OnCalculate(const int rates_total,
          }
       }
 
-      // Standalone Sweep allowed in balanced HTF (0) ONLY when institutional QualitySweep (risk>=1.45 ATR & body<=0.90 ATR),
+      // Standalone Sweep allowed per Symbol DNA g_effHTFMode (0=Balanced, 1=StrictTrend, 2=FlexSweep) AND QualitySweep,
       // OR in confluence with SqzBreak/VWAPPull
       double barBodyAtr = MathAbs(bodyOpenClose) / MathMax(atr, _Point);
       double bSwRawRisk = MathAbs(close[i] - (bullSweepExt - g_effSLBufferATR * atr));
       double bSwRiskAtr = MathMax(InpMinSLATR, MathMin(InpMaxSLATR, bSwRawRisk / MathMax(atr, _Point)));
       bool   bullQualSw = (bSwRiskAtr >= 1.45 && barBodyAtr <= 0.90);
-      trigBullSweep = rawBullSweep && (trigBullSqz || trigBullPull || ((!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == 0) && bullQualSw));
+      bool   bullSwHtfOk = (!InpUseHTFFilter || g_resolvedHTF == _Period) ||
+                           (g_effHTFMode == 2 ? true : (g_effHTFMode == 1 ? (htfBias == 1) : (htfBias == 0)));
+      trigBullSweep = rawBullSweep && (trigBullSqz || trigBullPull || (bullSwHtfOk && bullQualSw));
       if(trigBullSweep)
       {
          bullStructExtreme = bullSweepExt;
@@ -2141,7 +2274,9 @@ int OnCalculate(const int rates_total,
       double sSwRawRisk = MathAbs((bearSweepExt + g_effSLBufferATR * atr) - close[i]);
       double sSwRiskAtr = MathMax(InpMinSLATR, MathMin(InpMaxSLATR, sSwRawRisk / MathMax(atr, _Point)));
       bool   bearQualSw = (sSwRiskAtr >= 1.45 && barBodyAtr <= 0.90);
-      trigBearSweep = rawBearSweep && (trigBearSqz || trigBearPull || ((!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == 0) && bearQualSw));
+      bool   bearSwHtfOk = (!InpUseHTFFilter || g_resolvedHTF == _Period) ||
+                           (g_effHTFMode == 2 ? true : (g_effHTFMode == 1 ? (htfBias == -1) : (htfBias == 0)));
+      trigBearSweep = rawBearSweep && (trigBearSqz || trigBearPull || (bearSwHtfOk && bearQualSw));
       if(trigBearSweep)
       {
          bearStructExtreme = bearSweepExt;
@@ -2212,8 +2347,8 @@ int OnCalculate(const int rates_total,
          {
             if(InpMacroHardVeto && g_cachedMacroBias <= -50)
                bullScore = 0;
-            else
-               bullScore += (int)MathRound(0.15 * (double)g_cachedMacroBias);
+            else if(g_effMacroWeight > 0.001)
+               bullScore += (int)MathRound(g_effMacroWeight * (double)g_cachedMacroBias);
          }
          bullScore = MathMax(0, MathMin(100, bullScore));
       }
@@ -2277,8 +2412,8 @@ int OnCalculate(const int rates_total,
          {
             if(InpMacroHardVeto && g_cachedMacroBias >= 50)
                bearScore = 0;
-            else
-               bearScore -= (int)MathRound(0.15 * (double)g_cachedMacroBias);
+            else if(g_effMacroWeight > 0.001)
+               bearScore -= (int)MathRound(g_effMacroWeight * (double)g_cachedMacroBias);
          }
          bearScore = MathMax(0, MathMin(100, bearScore));
       }
