@@ -97,7 +97,7 @@
   <div class="container">
     <header>
       <div>
-        <h1>LeadingConfluencePro v2.02 — 24/7 Cloud Quant & ML Intelligence</h1>
+        <h1>LeadingConfluencePro v3.0 — 24/7 Cloud Quant & ML Intelligence</h1>
         <div class="subtitle" id="timestamps">Loading cloud telemetry...</div>
         <div id="sessionStrip" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;font-size:0.75rem;"></div>
       </div>
@@ -148,15 +148,16 @@
 
     <div class="two-col">
       <div class="section">
-        <h2>Cloud ML Meta-Model Audit (Purged Walk-Forward OOS)</h2>
+        <h2>Cloud ML Meta-Model Audit (True Nested Walk-Forward OOS)</h2>
         <div id="mlSummary">Loading ML report...</div>
+        <div id="playbookStats" style="margin-top:12px;"></div>
         <div id="featWeights" style="margin-top:14px;"></div>
       </div>
       <div class="section">
         <h2>Cloud Walk-Forward Optimized Configs</h2>
         <table>
           <thead>
-            <tr><th>Symbol</th><th>TF</th><th>Score</th><th>VWAP</th><th>TP1/TP2</th><th>OOS Win%</th><th>OOS Exp(R)</th><th>Status</th></tr>
+            <tr><th>Symbol</th><th>TF</th><th>Score</th><th>VWAP</th><th>Playbooks</th><th>TP1/TP2</th><th>OOS Win%</th><th>OOS Exp(R)</th><th>OOS PF</th><th>Max DD</th><th>Status</th></tr>
           </thead>
           <tbody id="cfgBody"></tbody>
         </table>
@@ -267,6 +268,13 @@
       return "B";
     }
 
+    function suggestedRiskPctJS(grade, oosExpR, mlProb, mlThresh) {
+      let base = grade === "A+" ? 1.00 : (grade === "A" ? 0.75 : 0.50);
+      if (oosExpR >= 0.08 && (mlProb == null || mlProb >= mlThresh + 0.05)) base += 0.25;
+      else if (oosExpR <= 0.0) base *= 0.50;
+      return Number(Math.max(0.25, Math.min(1.25, base)).toFixed(2));
+    }
+
     function resampleH1ToH4(bars1h, nowMs) {
       const buckets = new Map();
       const fourH = 4 * 3600000;
@@ -331,15 +339,17 @@
       const n = bars.length;
       if (n < 90) return { telemetry: null, signals: [] };
 
-      const minScore = Number(cfg?.MIN_SCORE) || 68;
+      const minScore = Number(cfg?.MIN_SCORE) || 65;
       const vwapPeriod = Math.max(5, Number(cfg?.VWAP_PERIOD) || 50);
       const slBufAtr = Number(cfg?.SL_BUFFER_ATR) || 0.25;
-      const tp1Mult = Number(cfg?.TP1_MULT) || 1.5;
-      const tp2Mult = Number(cfg?.TP2_MULT) || 2.5;
+      const tp1Mult = Number(cfg?.TP1_MULT) || 1.8;
+      const tp2Mult = Number(cfg?.TP2_MULT) || 3.0;
+      const oosExpR = Number(cfg?.OOS_EXP_R) || 0.0;
+      const wfStatus = cfg?.STATUS || "GLOBAL_MODEL";
       const enSweep = cfg ? (Number(cfg.EN_SWEEP) !== 0) : true;
       const enSqueeze = cfg ? (Number(cfg.EN_SQUEEZE) !== 0) : true;
       const enPullback = cfg ? (Number(cfg.EN_PULLBACK) !== 0) : true;
-      const mlThresh = Number(cfg?.ML_MIN_PROB) || Number(mlModel?.ml_min_prob) || 0.50;
+      const mlThresh = Number(cfg?.ML_MIN_PROB) || Number(mlModel?.ml_min_prob) || 0.35;
 
       const atrPeriod = 14, volPeriod = 20, sqzPeriod = 20, kerPeriod = 14, bbMult = 2.0, kcMult = 1.5;
       const pivotLeft = 5, pivotRight = 3, minSqzBars = 4, cooldownBars = 6;
@@ -552,66 +562,72 @@
         const vwapSlope = vwapVal[i] - vwapVal[i - 3];
         const ker = kerSmooth[i], htfB = htfBias[i], z = vwapZ[i], mb = Number(macroBias) || 0;
 
-        let trigBSw = false, trigBSq = false, trigBPl = false, bExt = bi.l;
+        let rawBSw = false, bSwExt = bi.l, trigBSq = false, trigBPl = false, bExt = bi.l;
         if (enSweep && swLow[i - 1] > 0 && (i - swLowBar[i - 1]) <= 80) {
           const swl = swLow[i - 1];
           const swNow = bi.l < swl - 0.05 * at;
           const swPrv = (bars[i - 1].l < swl - 0.05 * at) && (bars[i - 1].l > swl - 2.5 * at);
           if ((swNow || swPrv) && bi.c > swl && (bi.c > bi.o || clvI >= 0.45) && ofi[i] >= 0.15 && z <= 1.2 && !(htfB === -1 && ker >= 0.45)) {
-            trigBSw = true;
-            bExt = swPrv ? Math.min(bi.l, bars[i - 1].l) : bi.l;
+            rawBSw = true;
+            bSwExt = swPrv ? Math.min(bi.l, bars[i - 1].l) : bi.l;
           }
         }
         if (enSqueeze) {
           let maxH5 = -Infinity;
           for (let k = i - 5; k < i; k++) if (bars[k].h > maxH5) maxH5 = bars[k].h;
-          if (recentSqz && sqzOn[i] === 0 && bi.c > kcUpper[i] && bi.c > maxH5 && sqzMom[i] > 0 && sqzMom[i] > sqzMom[i - 1] && rvol[i] >= 1.20 && clvI >= 0.35 && ofi[i] >= 0.25 && z <= 2.2 && htfB >= 0) {
+          if (recentSqz && sqzOn[i] === 0 && bi.c > kcUpper[i] && bi.c > maxH5 && sqzMom[i] > 0 && sqzMom[i] > sqzMom[i - 1] && rvol[i] >= 1.20 && clvI >= 0.35 && ofi[i] >= 0.25 && z <= 2.2 && htfB === 1) {
             trigBSq = true;
-            const lm = Math.min(bi.l, bars[i - 1].l);
-            bExt = trigBSw ? Math.min(bExt, lm) : lm;
           }
         }
         if (enPullback) {
-          const trendSup = (htfB === 1) || (ker >= 0.25 && vwapSlope > 0 && emaFast[i] > emaSlow[i]);
+          const trendSup = (htfB === 1) && (ker >= 0.20 || vwapSlope > 0 || emaFast[i] > emaSlow[i]);
           const touched = (bi.l <= vwapVal[i] + 0.25 * at) || (bars[i - 1].l <= vwapVal[i - 1] + 0.25 * at);
           const held = bi.l >= vwapVal[i] - 2.2 * vwapStd[i];
           const confC = bi.c > bi.o && bi.c > vwapVal[i] && clvI >= 0.35 && (bi.c > bars[i - 1].h || body >= 0.40 * at);
           if (trendSup && touched && held && confC && ofi[i] >= 0.20 && rvol[i] >= 1.00 && z <= 1.8) {
             trigBPl = true;
-            const pm = Math.min(bi.l, bars[i - 1].l);
-            bExt = (trigBSw || trigBSq) ? Math.min(bExt, pm) : pm;
           }
         }
+        const trigBSw = rawBSw && (htfB === 0 || trigBSq || trigBPl);
+        if (trigBSw) {
+          bExt = bSwExt;
+          if (trigBSq || trigBPl) bExt = Math.min(bExt, Math.min(bi.l, bars[i - 1].l));
+        } else if (trigBSq || trigBPl) {
+          bExt = Math.min(bi.l, bars[i - 1].l);
+        }
 
-        let trigSSw = false, trigSSq = false, trigSPl = false, sExt = bi.h;
+        let rawSSw = false, sSwExt = bi.h, trigSSq = false, trigSPl = false, sExt = bi.h;
         if (enSweep && swHigh[i - 1] > 0 && (i - swHighBar[i - 1]) <= 80) {
           const swh = swHigh[i - 1];
           const swNow = bi.h > swh + 0.05 * at;
           const swPrv = (bars[i - 1].h > swh + 0.05 * at) && (bars[i - 1].h < swh + 2.5 * at);
           if ((swNow || swPrv) && bi.c < swh && (bi.c < bi.o || clvI <= -0.45) && ofi[i] <= -0.15 && z >= -1.2 && !(htfB === 1 && ker >= 0.45)) {
-            trigSSw = true;
-            sExt = swPrv ? Math.max(bi.h, bars[i - 1].h) : bi.h;
+            rawSSw = true;
+            sSwExt = swPrv ? Math.max(bi.h, bars[i - 1].h) : bi.h;
           }
         }
         if (enSqueeze) {
           let minL5 = Infinity;
           for (let k = i - 5; k < i; k++) if (bars[k].l < minL5) minL5 = bars[k].l;
-          if (recentSqz && sqzOn[i] === 0 && bi.c < kcLower[i] && bi.c < minL5 && sqzMom[i] < 0 && sqzMom[i] < sqzMom[i - 1] && rvol[i] >= 1.20 && clvI <= -0.35 && ofi[i] <= -0.25 && z >= -2.2 && htfB <= 0) {
+          if (recentSqz && sqzOn[i] === 0 && bi.c < kcLower[i] && bi.c < minL5 && sqzMom[i] < 0 && sqzMom[i] < sqzMom[i - 1] && rvol[i] >= 1.20 && clvI <= -0.35 && ofi[i] <= -0.25 && z >= -2.2 && htfB === -1) {
             trigSSq = true;
-            const hm = Math.max(bi.h, bars[i - 1].h);
-            sExt = trigSSw ? Math.max(sExt, hm) : hm;
           }
         }
         if (enPullback) {
-          const trendSup = (htfB === -1) || (ker >= 0.25 && vwapSlope < 0 && emaFast[i] < emaSlow[i]);
+          const trendSup = (htfB === -1) && (ker >= 0.20 || vwapSlope < 0 || emaFast[i] < emaSlow[i]);
           const touched = (bi.h >= vwapVal[i] - 0.25 * at) || (bars[i - 1].h >= vwapVal[i - 1] - 0.25 * at);
           const held = bi.h <= vwapVal[i] + 2.2 * vwapStd[i];
           const confC = bi.c < bi.o && bi.c < vwapVal[i] && clvI <= -0.35 && (bi.c < bars[i - 1].l || (-body) >= 0.40 * at);
           if (trendSup && touched && held && confC && ofi[i] <= -0.20 && rvol[i] >= 1.00 && z >= -1.8) {
             trigSPl = true;
-            const pm = Math.max(bi.h, bars[i - 1].h);
-            sExt = (trigSSw || trigSSq) ? Math.max(sExt, pm) : pm;
           }
+        }
+        const trigSSw = rawSSw && (htfB === 0 || trigSSq || trigSPl);
+        if (trigSSw) {
+          sExt = sSwExt;
+          if (trigSSq || trigSPl) sExt = Math.max(sExt, Math.max(bi.h, bars[i - 1].h));
+        } else if (trigSSq || trigSPl) {
+          sExt = Math.max(bi.h, bars[i - 1].h);
         }
 
         let bScore = 0, bPB = "None";
@@ -670,7 +686,7 @@
         if (finalDir !== 0) {
           const entry = bi.c;
           const rawRisk = finalDir === 1 ? Math.abs(entry - (bExt - slBufAtr * at)) : Math.abs((sExt + slBufAtr * at) - entry);
-          const risk = Math.max(0.80 * at, Math.min(2.50 * at, rawRisk));
+          const risk = Math.max(1.10 * at, Math.min(2.50 * at, rawRisk));
           const sl = finalDir === 1 ? (entry - risk) : (entry + risk);
           const tp1 = finalDir === 1 ? (entry + tp1Mult * risk) : (entry - tp1Mult * risk);
           const tp2 = finalDir === 1 ? (entry + tp2Mult * risk) : (entry - tp2Mult * risk);
@@ -699,6 +715,7 @@
             if (i === lastClosedIdx) latestSigDir = finalDir;
             if (i >= lastClosedIdx - maxBarsLookback && (nowMs - bi.t) <= maxAgeMs) {
               const dirStr = finalDir === 1 ? "BUY" : "SELL";
+              const gVal = signalGrade(scoreVal, prob, mlThresh, dirStr, mb);
               signals.push({
                 symbol: sym,
                 timeframe: tfName,
@@ -707,7 +724,9 @@
                 market_open: true,
                 direction: dirStr,
                 playbook: pbName,
-                grade: signalGrade(scoreVal, prob, mlThresh, dirStr, mb),
+                grade: gVal,
+                suggested_risk_pct: suggestedRiskPctJS(gVal, oosExpR, prob, mlThresh),
+                wf_status: wfStatus,
                 score: scoreVal,
                 ml_prob: prob != null ? Number(prob.toFixed(3)) : null,
                 macro_bias: mb,
@@ -1071,6 +1090,7 @@
         const rtBadge = s.source === "LIVE_RT" ? `<span class="pill pill-bull"><span class="live-dot"></span>LIVE RT</span>` : "";
         const closedBadge = muted ? `<span class="pill">CLOSED</span>` : "";
         const slPctTxt = s.sl_dist_pct != null ? ` (${s.sl_dist_pct}%)` : "";
+        const riskTxt = s.suggested_risk_pct != null ? ` &bull; Risk <strong>${s.suggested_risk_pct}%</strong>` : "";
         return `
           <div class="sig-card ${isBuy ? "sig-buy" : "sig-sell"}" style="${muted ? "opacity:0.75;" : ""}">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px;">
@@ -1082,7 +1102,7 @@
               </div>
             </div>
             <div style="font-size:0.82rem;color:var(--muted);margin-bottom:8px;">
-              Closed: ${s.bar_time_utc} &bull; Score <strong>${s.score}/100</strong>${mlTxt} &bull; Macro ${s.macro_bias >= 0 ? "+" : ""}${s.macro_bias}
+              Closed: ${s.bar_time_utc} &bull; Score <strong>${s.score}/100</strong>${mlTxt}${riskTxt} &bull; Macro ${s.macro_bias >= 0 ? "+" : ""}${s.macro_bias}
             </div>
             <div style="font-family:monospace;font-size:0.83rem;">
               Entry: ${s.entry} | SL: <span class="neg">${s.sl}</span>${slPctTxt}<br/>
@@ -1235,19 +1255,35 @@
 
     function renderML(ml) {
       const sumEl = document.getElementById("mlSummary");
+      const pbEl = document.getElementById("playbookStats");
       const fwEl = document.getElementById("featWeights");
       const cfgEl = document.getElementById("cfgBody");
       if (!ml) { sumEl.textContent = "ML report unavailable."; return; }
       const g = ml.global_model || {};
+      const wf = ml.wf_portfolio_summary || {};
       sumEl.innerHTML = `
         <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:0.86rem;">
-          <div>Samples: <strong>${g.samples ?? "—"}</strong> (OOS ${g.oos_samples ?? "—"})</div>
-          <div>Global ML Gate: <strong>&ge; ${g.ml_min_prob ? (g.ml_min_prob * 100).toFixed(0) + "%" : "—"}</strong></div>
-          <div>Logistic OOS AUC: <strong>${g.auc_lr ?? "—"}</strong> (Brier ${g.brier_lr ?? "—"})</div>
-          <div>HistGB OOS AUC: <strong>${g.auc_gb ?? "—"}</strong> (Brier ${g.brier_gb ?? "—"})</div>
-          <div>Baseline OOS: <strong>${g.base_oos_win_pct ?? "—"}%</strong> / <span class="${cls(g.base_oos_exp_r)}">${g.base_oos_exp_r >= 0 ? "+" : ""}${g.base_oos_exp_r ?? "—"}R</span></div>
+          <div>Intraday WF Exp: <strong class="${cls(wf.intraday_avg_exp_r)}">${wf.intraday_avg_exp_r >= 0 ? "+" : ""}${wf.intraday_avg_exp_r ?? "—"}R</strong> (PF ${wf.intraday_avg_pf ?? "—"})</div>
+          <div>WF Active / Def: <strong class="pos">${wf.wf_optimized_count ?? "—"}</strong> / <span class="neu">${wf.defensive_filter_count ?? "—"}</span> (${wf.intraday_oos_trades ?? "—"} OOS)</div>
+          <div>ML Samples / Gate: <strong>${g.samples ?? "—"}</strong> (&ge;${g.ml_min_prob ? (g.ml_min_prob * 100).toFixed(0) + "%" : "—"})</div>
+          <div>AUC (LR / HGB): <strong>${g.auc_lr ?? "—"}</strong> / <strong>${g.auc_gb ?? "—"}</strong></div>
+          <div>Intraday Base OOS: <strong>${g.base_oos_win_pct ?? "—"}%</strong> / <span class="${cls(g.base_oos_exp_r)}">${g.base_oos_exp_r >= 0 ? "+" : ""}${g.base_oos_exp_r ?? "—"}R</span></div>
           <div>ML-Filtered OOS: <strong>${g.ml_oos_win_pct ?? "—"}%</strong> / <span class="${cls(g.ml_oos_exp_r)}">${g.ml_oos_exp_r >= 0 ? "+" : ""}${g.ml_oos_exp_r ?? "—"}R</span></div>
         </div>`;
+
+      const pbs = ml.playbook_oos_stats || {};
+      const pbKeys = Object.keys(pbs).sort((a, b) => (pbs[b].exp_r ?? -9) - (pbs[a].exp_r ?? -9));
+      if (pbEl && pbKeys.length) {
+        pbEl.innerHTML = `<div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px;">Intraday Regime-Matched Playbook Performance (M15+H1)</div>` +
+          `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;font-size:0.80rem;">` +
+          pbKeys.map(k => {
+            const st = pbs[k];
+            return `<div style="background:#0f1520;border:1px solid var(--border);border-radius:8px;padding:8px 10px;">
+              <strong>${k}</strong> <span class="neu">(${st.trades})</span><br/>
+              Win ${st.win_pct}% &bull; <span class="${cls(st.exp_r)}">${st.exp_r >= 0 ? "+" : ""}${st.exp_r}R</span> &bull; PF ${st.pf}
+            </div>`;
+          }).join("") + `</div>`;
+      }
 
       const weights = ml.global_feature_weights || {};
       const entries = Object.entries(weights).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
@@ -1264,16 +1300,23 @@
         }).join("");
 
       const cfgs = ml.optimized_configs || [];
-      cfgEl.innerHTML = cfgs.map(c => `<tr>
-        <td><strong>${c.SYMBOL}</strong></td>
-        <td>${c.TIMEFRAME}</td>
-        <td>${c.MIN_SCORE}+</td>
-        <td>${c.VWAP_PERIOD}</td>
-        <td>${c.TP1_MULT}/${c.TP2_MULT}R</td>
-        <td>${fmt(c.OOS_WIN_PCT,1)}%</td>
-        <td class="${cls(c.OOS_EXP_R)}">${c.OOS_EXP_R >= 0 ? "+" : ""}${fmt(c.OOS_EXP_R,3)}</td>
-        <td><span class="pill ${c.STATUS === "WF_OPTIMIZED" ? "pill-bull" : ""}">${c.STATUS}</span></td>
-      </tr>`).join("");
+      cfgEl.innerHTML = cfgs.map(c => {
+        const pbsTxt = `${c.EN_SWEEP ? "Sw" : "—"}/${c.EN_SQUEEZE ? "Sq" : "—"}/${c.EN_PULLBACK ? "Pl" : "—"}`;
+        const stCls = c.STATUS === "WF_OPTIMIZED" ? "pill-bull" : (c.STATUS === "DEFENSIVE_FILTER" ? "pill-warn" : "");
+        return `<tr>
+          <td><strong>${c.SYMBOL}</strong></td>
+          <td>${c.TIMEFRAME}</td>
+          <td>${c.MIN_SCORE}+</td>
+          <td>${c.VWAP_PERIOD}</td>
+          <td class="neu" style="font-size:0.78rem">${pbsTxt}</td>
+          <td>${c.TP1_MULT}/${c.TP2_MULT}R</td>
+          <td>${fmt(c.OOS_WIN_PCT,1)}%</td>
+          <td class="${cls(c.OOS_EXP_R)}">${c.OOS_EXP_R >= 0 ? "+" : ""}${fmt(c.OOS_EXP_R,3)}</td>
+          <td>${c.OOS_PF != null ? fmt(c.OOS_PF,2) : "—"}</td>
+          <td>${c.OOS_MAX_DD_R != null ? fmt(c.OOS_MAX_DD_R,2) + "R" : "—"}</td>
+          <td><span class="pill ${stCls}">${c.STATUS}</span></td>
+        </tr>`;
+      }).join("");
     }
 
     renderSessionStrip();

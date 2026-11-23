@@ -39,10 +39,10 @@ class EngineParams:
     en_fvg_disp: bool = True
     use_htf: bool = True
     sl_buffer_atr: float = 0.25
-    min_sl_atr: float = 0.80
+    min_sl_atr: float = 1.10
     max_sl_atr: float = 2.50
-    tp1_mult: float = 1.5
-    tp2_mult: float = 2.5
+    tp1_mult: float = 1.8
+    tp2_mult: float = 3.0
     macro_hard_veto: bool = False
 
 
@@ -357,8 +357,9 @@ def compute_indicators_and_candidates(
         z = vwap_z[i]
         mb = float(macro_arr[i])
 
-        # Bullish Playbooks
-        trig_b_sw = False
+        # Bullish Playbooks (Regime-Matched v3.0 Routing)
+        raw_b_sw = False
+        b_sw_ext = l[i]
         trig_b_sq = False
         trig_b_pl = False
         b_ext = l[i]
@@ -375,8 +376,8 @@ def compute_indicators_and_candidates(
                 and z <= 1.2
                 and not (htf_b == -1 and ker >= 0.45)
             ):
-                trig_b_sw = True
-                b_ext = min(l[i], l[i - 1]) if sw_prv else l[i]
+                raw_b_sw = True
+                b_sw_ext = min(l[i], l[i - 1]) if sw_prv else l[i]
 
         if params.en_squeeze:
             max_h5 = float(np.max(h[i - 5 : i]))
@@ -391,14 +392,13 @@ def compute_indicators_and_candidates(
                 and clv_i >= 0.35
                 and ofi[i] >= 0.25
                 and z <= 2.2
-                and (not params.use_htf or htf_b >= 0)
+                and (not params.use_htf or htf_b == 1)
             ):
                 trig_b_sq = True
-                b_ext = min(l[i], l[i - 1]) if not trig_b_sw else min(b_ext, min(l[i], l[i - 1]))
 
         if params.en_pullback:
-            trend_sup = (params.use_htf and htf_b == 1) or (
-                ker >= 0.25 and vwap_slope > 0.0 and ema_fast[i] > ema_slow[i]
+            trend_sup = (not params.use_htf or htf_b == 1) and (
+                ker >= 0.20 or vwap_slope > 0.0 or ema_fast[i] > ema_slow[i]
             )
             touched = (l[i] <= vwap_val[i] + 0.25 * at) or (l[i - 1] <= vwap_val[i - 1] + 0.25 * at)
             held = l[i] >= vwap_val[i] - 2.2 * vwap_std[i]
@@ -407,11 +407,20 @@ def compute_indicators_and_candidates(
             )
             if trend_sup and touched and held and conf_c and ofi[i] >= 0.20 and rvol[i] >= 1.00 and z <= 1.8:
                 trig_b_pl = True
-                p_min = min(l[i], l[i - 1])
-                b_ext = p_min if (not trig_b_sw and not trig_b_sq) else min(b_ext, p_min)
 
-        # Bearish Playbooks
-        trig_s_sw = False
+        # Standalone Sweep allowed only when HTF is balanced (0), OR in confluence with SqzBreak/VWAPPull
+        trig_b_sw = raw_b_sw and (not params.use_htf or htf_b == 0 or trig_b_sq or trig_b_pl)
+        b_exts = []
+        if trig_b_sw:
+            b_exts.append(b_sw_ext)
+        if trig_b_sq or trig_b_pl:
+            b_exts.append(min(l[i], l[i - 1]))
+        if b_exts:
+            b_ext = min(b_exts)
+
+        # Bearish Playbooks (Regime-Matched v3.0 Routing)
+        raw_s_sw = False
+        s_sw_ext = h[i]
         trig_s_sq = False
         trig_s_pl = False
         s_ext = h[i]
@@ -428,8 +437,8 @@ def compute_indicators_and_candidates(
                 and z >= -1.2
                 and not (htf_b == 1 and ker >= 0.45)
             ):
-                trig_s_sw = True
-                s_ext = max(h[i], h[i - 1]) if sw_prv else h[i]
+                raw_s_sw = True
+                s_sw_ext = max(h[i], h[i - 1]) if sw_prv else h[i]
 
         if params.en_squeeze:
             min_l5 = float(np.min(l[i - 5 : i]))
@@ -444,14 +453,13 @@ def compute_indicators_and_candidates(
                 and clv_i <= -0.35
                 and ofi[i] <= -0.25
                 and z >= -2.2
-                and (not params.use_htf or htf_b <= 0)
+                and (not params.use_htf or htf_b == -1)
             ):
                 trig_s_sq = True
-                s_ext = max(h[i], h[i - 1]) if not trig_s_sw else max(s_ext, max(h[i], h[i - 1]))
 
         if params.en_pullback:
-            trend_sup = (params.use_htf and htf_b == -1) or (
-                ker >= 0.25 and vwap_slope < 0.0 and ema_fast[i] < ema_slow[i]
+            trend_sup = (not params.use_htf or htf_b == -1) and (
+                ker >= 0.20 or vwap_slope < 0.0 or ema_fast[i] < ema_slow[i]
             )
             touched = (h[i] >= vwap_val[i] - 0.25 * at) or (h[i - 1] >= vwap_val[i - 1] - 0.25 * at)
             held = h[i] <= vwap_val[i] + 2.2 * vwap_std[i]
@@ -460,8 +468,15 @@ def compute_indicators_and_candidates(
             )
             if trend_sup and touched and held and conf_c and ofi[i] <= -0.20 and rvol[i] >= 1.00 and z >= -1.8:
                 trig_s_pl = True
-                p_max = max(h[i], h[i - 1])
-                s_ext = p_max if (not trig_s_sw and not trig_s_sq) else max(s_ext, p_max)
+
+        trig_s_sw = raw_s_sw and (not params.use_htf or htf_b == 0 or trig_s_sq or trig_s_pl)
+        s_exts = []
+        if trig_s_sw:
+            s_exts.append(s_sw_ext)
+        if trig_s_sq or trig_s_pl:
+            s_exts.append(max(h[i], h[i - 1]))
+        if s_exts:
+            s_ext = max(s_exts)
 
         # Bull Score
         b_score = 0

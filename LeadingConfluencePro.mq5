@@ -7,7 +7,7 @@
 //+------------------------------------------------------------------+
 #property copyright "LeadingConfluencePro Quantitative Architecture"
 #property link      "https://github.com/gamehotspot62/mt5-leading-confluence-cloud"
-#property version   "2.02"
+#property version   "3.00"
 #property description "Universal non-repainting leading confluence indicator v2.01:"
 #property description "1) BVC + CLV Order Flow Delta & CVD Divergence (microstructure)"
 #property description "2) Wyckoff Liquidity Sweep / SFP Reversal (behavioral stop hunts)"
@@ -110,10 +110,10 @@ input ENUM_TIMEFRAMES InpHTFTimeframe             = PERIOD_CURRENT;// HTF Timefr
 
 input group "=== 4. Risk Levels (SL / TP Projections) ==="
 input double          InpSLBufferATR              = 0.25;          // Stop Loss Structural Buffer (Manual Fallback)
-input double          InpMinSLATR                 = 0.80;          // Minimum Stop Loss Distance (ATR Mult)
+input double          InpMinSLATR                 = 1.10;          // Minimum Stop Loss Distance (ATR Mult)
 input double          InpMaxSLATR                 = 2.50;          // Maximum Stop Loss Distance (ATR Mult)
-input double          InpTP1RiskMult              = 1.5;           // Take Profit 1 R-Multiple (Manual Fallback)
-input double          InpTP2RiskMult              = 2.5;           // Take Profit 2 R-Multiple (Manual Fallback)
+input double          InpTP1RiskMult              = 1.8;           // Take Profit 1 R-Multiple (Manual Fallback)
+input double          InpTP2RiskMult              = 3.0;           // Take Profit 2 R-Multiple (Manual Fallback)
 input bool            InpShowLastTradeLines       = true;          // Draw Latest Signal Entry / SL / TP1 / TP2 Lines
 
 input group "=== 5. External Macro & Cloud ML Adaptive Bridge ==="
@@ -196,8 +196,8 @@ int    g_sigPlaybook[];
 int    g_effMinScore       = 68;
 int    g_effVWAPPeriod     = 50;
 double g_effSLBufferATR    = 0.25;
-double g_effTP1Mult        = 1.5;
-double g_effTP2Mult        = 2.5;
+double g_effTP1Mult        = 1.8;
+double g_effTP2Mult        = 3.0;
 bool   g_effEnSweep        = true;
 bool   g_effEnSqueeze      = true;
 bool   g_effEnPullback     = true;
@@ -1233,7 +1233,7 @@ void UpdateVisualsAndStats(const int rates_total,
    // Row 1: Title
    string tfName = EnumToString(_Period);
    StringReplace(tfName, "PERIOD_", "");
-   string titleStr = StringFormat("LEADING CONFLUENCE PRO v2 [%s %s] | Closed-Bar Non-Repainting", _Symbol, tfName);
+   string titleStr = StringFormat("LEADING CONFLUENCE PRO v3.0 [%s %s] | Regime-Matched Causal", _Symbol, tfName);
    SetDashLabel(g_prefix + "R1", titleStr, xTxt, yTxt, clrWhite, 9);
    yTxt += dy;
 
@@ -1911,10 +1911,12 @@ int OnCalculate(const int rates_total,
       int    htfBias   = g_htfBias[i];
       double z         = g_vwapZ[i];
 
-      //--- Check Playbooks (Bullish)
-      bool trigBullSweep = false;
-      bool trigBullSqz   = false;
-      bool trigBullPull  = false;
+      //--- Check Playbooks (Bullish — v3.0 Regime-Matched Routing)
+      bool   rawBullSweep  = false;
+      double bullSweepExt  = low[i];
+      bool   trigBullSweep = false;
+      bool   trigBullSqz   = false;
+      bool   trigBullPull  = false;
       double bullStructExtreme = low[i];
 
       if(g_effEnSweep && g_swLow[i - 1] > 0.0 && (i - g_swLowBar[i - 1]) <= 80)
@@ -1929,8 +1931,8 @@ int OnCalculate(const int rates_total,
             z <= 1.2 &&
             !(htfBias == -1 && ker >= 0.45))
          {
-            trigBullSweep = true;
-            bullStructExtreme = sweptPrev ? MathMin(low[i], low[i - 1]) : low[i];
+            rawBullSweep = true;
+            bullSweepExt = sweptPrev ? MathMin(low[i], low[i - 1]) : low[i];
          }
       }
 
@@ -1949,42 +1951,48 @@ int OnCalculate(const int rates_total,
             clv >= 0.35 &&
             g_ofi[i] >= 0.25 &&
             z <= 2.2 &&
-            (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias >= 0))
+            (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == 1))
          {
             trigBullSqz = true;
-            if(!trigBullSweep)
-               bullStructExtreme = MathMin(low[i], low[i - 1]);
-            else
-               bullStructExtreme = MathMin(bullStructExtreme, MathMin(low[i], low[i - 1]));
          }
       }
 
       if(g_effEnPullback)
       {
-         bool trendSupport = (InpUseHTFFilter && g_resolvedHTF != _Period && htfBias == 1) ||
-                             (ker >= 0.25 && vwapSlope > 0.0 && g_emaFast[i] > g_emaSlow[i]);
-         bool touchedVWAP  = (low[i] <= g_vwapVal[i] + 0.25 * atr) ||
-                             (low[i - 1] <= g_vwapVal[i - 1] + 0.25 * atr);
-         bool heldSupport  = (low[i] >= g_vwapVal[i] - 2.2 * g_vwapStd[i]);
-         bool confirmClose = (close[i] > open[i] && close[i] > g_vwapVal[i] && clv >= 0.35 &&
-                              (close[i] > high[i - 1] || bodyOpenClose >= 0.40 * atr));
+         bool htfAlignedBull = (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == 1);
+         bool trendSupport   = htfAlignedBull && (ker >= 0.20 || vwapSlope > 0.0 || g_emaFast[i] > g_emaSlow[i]);
+         bool touchedVWAP    = (low[i] <= g_vwapVal[i] + 0.25 * atr) ||
+                               (low[i - 1] <= g_vwapVal[i - 1] + 0.25 * atr);
+         bool heldSupport    = (low[i] >= g_vwapVal[i] - 2.2 * g_vwapStd[i]);
+         bool confirmClose   = (close[i] > open[i] && close[i] > g_vwapVal[i] && clv >= 0.35 &&
+                                (close[i] > high[i - 1] || bodyOpenClose >= 0.40 * atr));
 
          if(trendSupport && touchedVWAP && heldSupport && confirmClose &&
             g_ofi[i] >= 0.20 && g_rvol[i] >= 1.00 && z <= 1.8)
          {
             trigBullPull = true;
-            double pullMin = MathMin(low[i], low[i - 1]);
-            if(!trigBullSweep && !trigBullSqz)
-               bullStructExtreme = pullMin;
-            else
-               bullStructExtreme = MathMin(bullStructExtreme, pullMin);
          }
       }
 
-      //--- Check Playbooks (Bearish)
-      bool trigBearSweep = false;
-      bool trigBearSqz   = false;
-      bool trigBearPull  = false;
+      // Standalone Sweep in balanced HTF (0), or confluence Sweep + Sqz/Pullback with HTF (+1)
+      trigBullSweep = rawBullSweep && (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == 0 || trigBullSqz || trigBullPull);
+      if(trigBullSweep)
+      {
+         bullStructExtreme = bullSweepExt;
+         if(trigBullSqz || trigBullPull)
+            bullStructExtreme = MathMin(bullStructExtreme, MathMin(low[i], low[i - 1]));
+      }
+      else if(trigBullSqz || trigBullPull)
+      {
+         bullStructExtreme = MathMin(low[i], low[i - 1]);
+      }
+
+      //--- Check Playbooks (Bearish — v3.0 Regime-Matched Routing)
+      bool   rawBearSweep  = false;
+      double bearSweepExt  = high[i];
+      bool   trigBearSweep = false;
+      bool   trigBearSqz   = false;
+      bool   trigBearPull  = false;
       double bearStructExtreme = high[i];
 
       if(g_effEnSweep && g_swHigh[i - 1] > 0.0 && (i - g_swHighBar[i - 1]) <= 80)
@@ -1999,8 +2007,8 @@ int OnCalculate(const int rates_total,
             z >= -1.2 &&
             !(htfBias == 1 && ker >= 0.45))
          {
-            trigBearSweep = true;
-            bearStructExtreme = sweptPrev ? MathMax(high[i], high[i - 1]) : high[i];
+            rawBearSweep = true;
+            bearSweepExt = sweptPrev ? MathMax(high[i], high[i - 1]) : high[i];
          }
       }
 
@@ -2019,36 +2027,39 @@ int OnCalculate(const int rates_total,
             clv <= -0.35 &&
             g_ofi[i] <= -0.25 &&
             z >= -2.2 &&
-            (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias <= 0))
+            (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == -1))
          {
             trigBearSqz = true;
-            if(!trigBearSweep)
-               bearStructExtreme = MathMax(high[i], high[i - 1]);
-            else
-               bearStructExtreme = MathMax(bearStructExtreme, MathMax(high[i], high[i - 1]));
          }
       }
 
       if(g_effEnPullback)
       {
-         bool trendSupport = (InpUseHTFFilter && g_resolvedHTF != _Period && htfBias == -1) ||
-                             (ker >= 0.25 && vwapSlope < 0.0 && g_emaFast[i] < g_emaSlow[i]);
-         bool touchedVWAP  = (high[i] >= g_vwapVal[i] - 0.25 * atr) ||
-                             (high[i - 1] >= g_vwapVal[i - 1] - 0.25 * atr);
-         bool heldResist   = (high[i] <= g_vwapVal[i] + 2.2 * g_vwapStd[i]);
-         bool confirmClose = (close[i] < open[i] && close[i] < g_vwapVal[i] && clv <= -0.35 &&
-                              (close[i] < low[i - 1] || (-bodyOpenClose) >= 0.40 * atr));
+         bool htfAlignedBear = (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == -1);
+         bool trendSupport   = htfAlignedBear && (ker >= 0.20 || vwapSlope < 0.0 || g_emaFast[i] < g_emaSlow[i]);
+         bool touchedVWAP    = (high[i] >= g_vwapVal[i] - 0.25 * atr) ||
+                               (high[i - 1] >= g_vwapVal[i - 1] - 0.25 * atr);
+         bool heldResist     = (high[i] <= g_vwapVal[i] + 2.2 * g_vwapStd[i]);
+         bool confirmClose   = (close[i] < open[i] && close[i] < g_vwapVal[i] && clv <= -0.35 &&
+                                (close[i] < low[i - 1] || (-bodyOpenClose) >= 0.40 * atr));
 
          if(trendSupport && touchedVWAP && heldResist && confirmClose &&
             g_ofi[i] <= -0.20 && g_rvol[i] >= 1.00 && z >= -1.8)
          {
             trigBearPull = true;
-            double pullMax = MathMax(high[i], high[i - 1]);
-            if(!trigBearSweep && !trigBearSqz)
-               bearStructExtreme = pullMax;
-            else
-               bearStructExtreme = MathMax(bearStructExtreme, pullMax);
          }
+      }
+
+      trigBearSweep = rawBearSweep && (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == 0 || trigBearSqz || trigBearPull);
+      if(trigBearSweep)
+      {
+         bearStructExtreme = bearSweepExt;
+         if(trigBearSqz || trigBearPull)
+            bearStructExtreme = MathMax(bearStructExtreme, MathMax(high[i], high[i - 1]));
+      }
+      else if(trigBearSqz || trigBearPull)
+      {
+         bearStructExtreme = MathMax(high[i], high[i - 1]);
       }
 
       //--- Calculate 100-Point Confluence Score (Bullish)

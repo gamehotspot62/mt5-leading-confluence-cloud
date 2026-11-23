@@ -64,6 +64,8 @@ def _load_optimized_configs() -> Dict[Tuple[str, str], Dict[str, Any]]:
             "en_squeeze": int(float(parts[8])) == 1,
             "en_pullback": int(float(parts[9])) == 1,
             "ml_min_prob": float(parts[10]),
+            "oos_exp_r": float(parts[12]) if len(parts) >= 13 else 0.0,
+            "status": parts[13] if len(parts) >= 14 else "",
         }
     return out
 
@@ -145,6 +147,21 @@ def _signal_grade(
     if score >= 72 and (ml_prob is None or ml_prob >= ml_thresh + 0.02):
         return "A"
     return "B"
+
+
+def _suggested_risk_pct(
+    grade: str,
+    oos_exp_r: float,
+    ml_prob: Optional[float],
+    ml_thresh: float,
+) -> float:
+    """Quarter-Kelly conviction risk sizing in [0.25%, 1.25%] equity per trade."""
+    base = 1.00 if grade == "A+" else (0.75 if grade == "A" else 0.50)
+    if oos_exp_r >= 0.08 and (ml_prob is None or ml_prob >= ml_thresh + 0.05):
+        base += 0.25
+    elif oos_exp_r <= 0.0:
+        base *= 0.50
+    return round(max(0.25, min(1.25, base)), 2)
 
 
 def _compute_live_bar_features_and_probs(
@@ -229,9 +246,10 @@ def _send_notifications(new_alerts: List[Dict[str, Any]]) -> None:
     for a in new_alerts:
         prob_txt = f" | ML {a['ml_prob']*100:.0f}%" if a.get("ml_prob") is not None else ""
         grade_txt = f" [{a.get('grade', 'B')}]"
+        risk_txt = f" | Risk: `{a.get('suggested_risk_pct', 0.50):.2f}%`" if a.get("suggested_risk_pct") is not None else ""
         lines.append(
             f"• *{a['symbol']} {a['timeframe']}* `{a['direction']}` ({a['playbook']}){grade_txt} "
-            f"| Score `{a['score']}/100`{prob_txt} | Macro `{a['macro_bias']:+d}`\n"
+            f"| Score `{a['score']}/100`{prob_txt} | Macro `{a['macro_bias']:+d}`{risk_txt}\n"
             f"  Entry: `{a['entry']:.5g}` | SL: `{a['sl']:.5g}` ({a.get('sl_dist_pct', 0):.2f}%) | TP1: `{a['tp1']:.5g}` | TP2: `{a['tp2']:.5g}`"
         )
     text_msg = "\n".join(lines)
@@ -313,16 +331,19 @@ def run_live_scan() -> Dict[str, Any]:
                 cfg_map.get((sym, "M15"), cfg_map.get((sym, "H1"), cfg_map.get(("GLOBAL", "ALL"), {}))),
             )
             params = EngineParams(
-                min_score=int(cfg.get("min_score", 68)),
+                min_score=int(cfg.get("min_score", 65)),
                 vwap_period=int(cfg.get("vwap_period", 50)),
                 sl_buffer_atr=float(cfg.get("sl_buffer_atr", 0.25)),
-                tp1_mult=float(cfg.get("tp1_mult", 1.5)),
-                tp2_mult=float(cfg.get("tp2_mult", 2.5)),
+                min_sl_atr=1.10,
+                tp1_mult=float(cfg.get("tp1_mult", 1.8)),
+                tp2_mult=float(cfg.get("tp2_mult", 3.0)),
                 en_sweep=bool(cfg.get("en_sweep", True)),
                 en_squeeze=bool(cfg.get("en_squeeze", True)),
                 en_pullback=bool(cfg.get("en_pullback", True)),
             )
-            ml_thresh = float(cfg.get("ml_min_prob", ml_model["ml_min_prob"] if ml_model else 0.50))
+            oos_exp_r = float(cfg.get("oos_exp_r", 0.0))
+            wf_status = str(cfg.get("status", "GLOBAL_MODEL"))
+            ml_thresh = float(cfg.get("ml_min_prob", ml_model["ml_min_prob"] if ml_model else 0.35))
 
             macro_arr = np.full(len(tf_df), float(macro_val), dtype=float)
             res = compute_indicators_and_candidates(
@@ -362,6 +383,7 @@ def run_live_scan() -> Dict[str, Any]:
                 sl_val = float(cand["sl"])
                 sl_dist_pct = round(abs(entry_val - sl_val) / max(abs(entry_val), 1e-9) * 100.0, 2)
                 grade = _signal_grade(int(cand["score"]), prob, ml_thresh, dir_str, int(macro_val))
+                sug_risk = _suggested_risk_pct(grade, oos_exp_r, prob, ml_thresh)
 
                 sig_obj = {
                     "symbol": sym,
@@ -372,6 +394,8 @@ def run_live_scan() -> Dict[str, Any]:
                     "direction": dir_str,
                     "playbook": cand["playbook"],
                     "grade": grade,
+                    "suggested_risk_pct": sug_risk,
+                    "wf_status": wf_status,
                     "score": int(cand["score"]),
                     "ml_prob": round(prob, 3) if prob is not None else None,
                     "macro_bias": int(macro_val),

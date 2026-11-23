@@ -199,7 +199,7 @@ def label_candidates(
     candidates: List[Dict[str, Any]],
     tp1_mult: float,
     tp2_mult: float,
-    max_hold: int = 30,
+    max_hold: int = 42,
     cost_r: float = 0.05,
 ) -> pd.DataFrame:
     """
@@ -336,63 +336,19 @@ def purged_walk_forward_splits(
     return splits
 
 
-def evaluate_oos_config(
-    df: pd.DataFrame,
-    base_tf: str,
-    macro_arr: np.ndarray,
-    cfg: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Evaluate one parameter configuration strictly on OOS walk-forward segments."""
-    params = EngineParams(
-        min_score=int(cfg["min_score"]),
-        vwap_period=int(cfg["vwap_period"]),
-        sl_buffer_atr=float(cfg["sl_buffer_atr"]),
-        tp1_mult=float(cfg["tp1_mult"]),
-        tp2_mult=float(cfg["tp2_mult"]),
-        en_sweep=bool(cfg["en_sweep"]),
-        en_squeeze=bool(cfg["en_squeeze"]),
-        en_pullback=bool(cfg["en_pullback"]),
-    )
-    res = compute_indicators_and_candidates(
-        df, params, base_tf=base_tf, macro_bias_arr=macro_arr, use_macro_score=True
-    )
-    ev = label_candidates(df, res["candidates"], params.tp1_mult, params.tp2_mult)
-    if ev.empty or len(ev) < 16:
-        return {"ok": False, "trades": len(ev)}
-
-    # Evaluate OOS across last 4 chronological segments (expanding WF starting at 40% history)
-    n_ev = len(ev)
-    start_oos = max(6, int(0.35 * n_ev))
-    oos = ev.iloc[start_oos:].copy()
-    if len(oos) < 12:
-        return {"ok": False, "trades": len(oos)}
-
-    r_vals = oos["r_net"].values
-    oos_trades = len(oos)
-    oos_exp_r = float(np.mean(r_vals))
-    oos_win_pct = float(100.0 * np.mean(oos["y"].values))
-
-    # Fold stability penalty & max drawdown in R
-    chunks = np.array_split(r_vals, min(4, max(2, oos_trades // 4)))
+def _score_segment(r_vals: np.ndarray) -> float:
+    """Stability-penalized Sharpe-like expectancy objective for walk-forward parameter selection."""
+    n = len(r_vals)
+    if n < 6:
+        return -999.0
+    exp_r = float(np.mean(r_vals))
+    chunks = np.array_split(r_vals, min(4, max(2, n // 4)))
     fold_means = [float(np.mean(ch)) for ch in chunks if len(ch) > 0]
     fold_std = float(np.std(fold_means)) if len(fold_means) > 1 else 0.0
-
     eq = np.cumsum(r_vals)
     peak = np.maximum.accumulate(np.insert(eq, 0, 0.0))[1:]
-    dd = peak - eq
-    max_dd = float(np.max(dd)) if len(dd) > 0 else 0.0
-
-    objective = oos_exp_r * math.sqrt(min(oos_trades, 60)) - 0.35 * fold_std - 0.10 * max_dd
-
-    return {
-        "ok": True,
-        "trades": oos_trades,
-        "win_pct": round(oos_win_pct, 1),
-        "exp_r": round(oos_exp_r, 3),
-        "max_dd_r": round(max_dd, 2),
-        "objective": round(objective, 4),
-        "events_df": ev,
-    }
+    max_dd = float(np.max(peak - eq)) if len(eq) > 0 else 0.0
+    return float(exp_r * math.sqrt(min(n, 60)) - 0.30 * fold_std - 0.08 * max_dd)
 
 
 def optimize_symbol_timeframe(
@@ -402,47 +358,111 @@ def optimize_symbol_timeframe(
     macro_arr: np.ndarray,
 ) -> Tuple[Dict[str, Any], pd.DataFrame]:
     """
-    Run stability-penalized walk-forward parameter search on curated low-overfit grid.
-    Returns (best_row_dict, baseline_events_for_ml).
+    True 3-Fold Anchored Nested Walk-Forward Parameter Optimizer (v3.0 Regime-Matched):
+    - Each fold selects best config strictly on IS history (bar_idx < t_split)
+    - Evaluates ONLY unseen future bars [t_split .. t_end) using that IS-chosen config
+    - Assigns DEFENSIVE_FILTER when nested OOS expectancy <= 0
     """
     curated_grid: List[Dict[str, Any]] = [
-        {"min_score": 68, "vwap_period": 50, "sl_buffer_atr": 0.25, "tp1_mult": 1.5, "tp2_mult": 2.5, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
-        {"min_score": 60, "vwap_period": 50, "sl_buffer_atr": 0.25, "tp1_mult": 1.5, "tp2_mult": 2.5, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
-        {"min_score": 65, "vwap_period": 50, "sl_buffer_atr": 0.20, "tp1_mult": 1.5, "tp2_mult": 2.5, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
-        {"min_score": 72, "vwap_period": 50, "sl_buffer_atr": 0.25, "tp1_mult": 1.5, "tp2_mult": 2.5, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
-        {"min_score": 76, "vwap_period": 50, "sl_buffer_atr": 0.30, "tp1_mult": 1.5, "tp2_mult": 2.5, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
-        {"min_score": 65, "vwap_period": 34, "sl_buffer_atr": 0.25, "tp1_mult": 1.3, "tp2_mult": 2.2, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
-        {"min_score": 68, "vwap_period": 34, "sl_buffer_atr": 0.20, "tp1_mult": 1.5, "tp2_mult": 2.5, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
-        {"min_score": 68, "vwap_period": 72, "sl_buffer_atr": 0.30, "tp1_mult": 1.8, "tp2_mult": 3.0, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
-        {"min_score": 65, "vwap_period": 72, "sl_buffer_atr": 0.25, "tp1_mult": 1.5, "tp2_mult": 2.5, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
         {"min_score": 65, "vwap_period": 50, "sl_buffer_atr": 0.25, "tp1_mult": 1.8, "tp2_mult": 3.0, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
-        {"min_score": 65, "vwap_period": 50, "sl_buffer_atr": 0.20, "tp1_mult": 1.3, "tp2_mult": 2.2, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 0},
-        {"min_score": 65, "vwap_period": 50, "sl_buffer_atr": 0.25, "tp1_mult": 1.5, "tp2_mult": 2.5, "en_sweep": 0, "en_squeeze": 1, "en_pullback": 1},
+        {"min_score": 62, "vwap_period": 50, "sl_buffer_atr": 0.25, "tp1_mult": 1.8, "tp2_mult": 3.0, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
+        {"min_score": 68, "vwap_period": 50, "sl_buffer_atr": 0.25, "tp1_mult": 1.8, "tp2_mult": 3.0, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
+        {"min_score": 72, "vwap_period": 50, "sl_buffer_atr": 0.30, "tp1_mult": 1.8, "tp2_mult": 3.0, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
+        {"min_score": 65, "vwap_period": 34, "sl_buffer_atr": 0.25, "tp1_mult": 1.8, "tp2_mult": 3.0, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
+        {"min_score": 65, "vwap_period": 72, "sl_buffer_atr": 0.25, "tp1_mult": 1.8, "tp2_mult": 3.0, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
+        {"min_score": 65, "vwap_period": 50, "sl_buffer_atr": 0.25, "tp1_mult": 2.0, "tp2_mult": 3.2, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
+        {"min_score": 65, "vwap_period": 50, "sl_buffer_atr": 0.20, "tp1_mult": 1.5, "tp2_mult": 2.5, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
+        {"min_score": 68, "vwap_period": 34, "sl_buffer_atr": 0.20, "tp1_mult": 1.5, "tp2_mult": 2.5, "en_sweep": 1, "en_squeeze": 1, "en_pullback": 1},
+        {"min_score": 65, "vwap_period": 50, "sl_buffer_atr": 0.25, "tp1_mult": 1.8, "tp2_mult": 3.0, "en_sweep": 0, "en_squeeze": 1, "en_pullback": 1},
+        {"min_score": 62, "vwap_period": 50, "sl_buffer_atr": 0.25, "tp1_mult": 1.8, "tp2_mult": 3.0, "en_sweep": 0, "en_squeeze": 1, "en_pullback": 1},
+        {"min_score": 68, "vwap_period": 72, "sl_buffer_atr": 0.30, "tp1_mult": 2.0, "tp2_mult": 3.2, "en_sweep": 0, "en_squeeze": 1, "en_pullback": 1},
     ]
 
-    best_cfg = curated_grid[0]
-    best_eval: Optional[Dict[str, Any]] = None
-
+    ev_by_cfg: List[pd.DataFrame] = []
     for cfg in curated_grid:
-        ev_res = evaluate_oos_config(df, base_tf, macro_arr, cfg)
-        if not ev_res.get("ok"):
-            continue
-        if best_eval is None or ev_res["objective"] > best_eval["objective"]:
-            best_eval = ev_res
-            best_cfg = cfg
+        params = EngineParams(
+            min_score=int(cfg["min_score"]),
+            vwap_period=int(cfg["vwap_period"]),
+            sl_buffer_atr=float(cfg["sl_buffer_atr"]),
+            min_sl_atr=1.10,
+            tp1_mult=float(cfg["tp1_mult"]),
+            tp2_mult=float(cfg["tp2_mult"]),
+            en_sweep=bool(cfg["en_sweep"]),
+            en_squeeze=bool(cfg["en_squeeze"]),
+            en_pullback=bool(cfg["en_pullback"]),
+        )
+        res = compute_indicators_and_candidates(
+            df, params, base_tf=base_tf, macro_bias_arr=macro_arr, use_macro_score=True
+        )
+        ev = label_candidates(df, res["candidates"], params.tp1_mult, params.tp2_mult, max_hold=42)
+        ev_by_cfg.append(ev)
 
-    # Collect ML training candidates at relaxed threshold (58+) to maximize sample richness
+    n = len(df)
+    folds = [
+        (int(0.45 * n), int(0.63 * n)),
+        (int(0.63 * n), int(0.81 * n)),
+        (int(0.81 * n), n),
+    ]
+    stitched_parts: List[pd.DataFrame] = []
+    for t_split, t_end in folds:
+        best_idx = 0
+        best_is_obj = -999.0
+        for idx, ev in enumerate(ev_by_cfg):
+            if ev.empty:
+                continue
+            is_r = ev.loc[ev["bar_idx"] < t_split, "r_net"].values
+            sc = _score_segment(is_r)
+            if sc > best_is_obj:
+                best_is_obj = sc
+                best_idx = idx
+        ev_sel = ev_by_cfg[best_idx]
+        if not ev_sel.empty:
+            te_df = ev_sel[(ev_sel["bar_idx"] >= t_split) & (ev_sel["bar_idx"] < t_end)]
+            if not te_df.empty:
+                stitched_parts.append(te_df)
+
+    stitched_oos = pd.concat(stitched_parts, ignore_index=True) if stitched_parts else pd.DataFrame()
+    oos_trades = int(len(stitched_oos))
+    if oos_trades > 0:
+        r_vals = stitched_oos["r_net"].values.astype(float)
+        oos_exp_r = round(float(np.mean(r_vals)), 3)
+        oos_win_pct = round(100.0 * float(np.mean(r_vals > 0.0)), 1)
+        gross_p = float(np.sum(r_vals[r_vals > 0.0]))
+        gross_l = float(abs(np.sum(r_vals[r_vals < 0.0])))
+        oos_pf = round(min(9.99, gross_p / max(gross_l, 1e-6)), 2) if gross_p > 0.0 else 0.0
+        eq = np.cumsum(r_vals)
+        peak = np.maximum.accumulate(np.insert(eq, 0, 0.0))[1:]
+        oos_max_dd = round(float(np.max(peak - eq)), 2)
+    else:
+        oos_exp_r = 0.0
+        oos_win_pct = 0.0
+        oos_pf = 0.0
+        oos_max_dd = 0.0
+
+    # Choose best full-sample config for live production on positive-edge series
+    prod_cfg = curated_grid[0]
+    best_full_obj = -999.0
+    for idx, ev in enumerate(ev_by_cfg):
+        if ev.empty:
+            continue
+        sc = _score_segment(ev["r_net"].values)
+        if sc > best_full_obj:
+            best_full_obj = sc
+            prod_cfg = curated_grid[idx]
+
+    # Collect standardized ML training candidates at relaxed threshold (58+) with uniform 1.8R/3.0R barriers
     ml_params = EngineParams(
         min_score=58,
-        vwap_period=int(best_cfg["vwap_period"]),
-        sl_buffer_atr=float(best_cfg["sl_buffer_atr"]),
-        tp1_mult=float(best_cfg["tp1_mult"]),
-        tp2_mult=float(best_cfg["tp2_mult"]),
+        vwap_period=int(prod_cfg["vwap_period"]),
+        sl_buffer_atr=float(prod_cfg["sl_buffer_atr"]),
+        min_sl_atr=1.10,
+        tp1_mult=1.8,
+        tp2_mult=3.0,
     )
     ml_res = compute_indicators_and_candidates(
         df, ml_params, base_tf=base_tf, macro_bias_arr=macro_arr, use_macro_score=True
     )
-    ml_ev = label_candidates(df, ml_res["candidates"], ml_params.tp1_mult, ml_params.tp2_mult)
+    ml_ev = label_candidates(df, ml_res["candidates"], 1.8, 3.0, max_hold=42)
     tf_label = "M15" if base_tf == "15m" else ("H1" if base_tf == "1h" else "D1")
     if not ml_ev.empty:
         ml_ev["symbol"] = sym
@@ -450,42 +470,43 @@ def optimize_symbol_timeframe(
         ml_ev["timeframe"] = tf_label
         ml_ev["series_id"] = f"{sym}_{tf_label}"
 
-    if best_eval is not None and best_eval["trades"] >= 12 and best_eval["exp_r"] > 0.0:
+    if oos_trades >= 8 and oos_exp_r > 0.0:
         row = {
             "SYMBOL": sym,
             "TIMEFRAME": tf_label,
-            "MIN_SCORE": int(best_cfg["min_score"]),
-            "VWAP_PERIOD": int(best_cfg["vwap_period"]),
-            "SL_BUFFER_ATR": float(best_cfg["sl_buffer_atr"]),
-            "TP1_MULT": float(best_cfg["tp1_mult"]),
-            "TP2_MULT": float(best_cfg["tp2_mult"]),
-            "EN_SWEEP": int(best_cfg["en_sweep"]),
-            "EN_SQUEEZE": int(best_cfg["en_squeeze"]),
-            "EN_PULLBACK": int(best_cfg["en_pullback"]),
-            "OOS_WIN_PCT": float(best_eval["win_pct"]),
-            "OOS_EXP_R": float(best_eval["exp_r"]),
-            "OOS_TRADES": int(best_eval["trades"]),
+            "MIN_SCORE": int(prod_cfg["min_score"]),
+            "VWAP_PERIOD": int(prod_cfg["vwap_period"]),
+            "SL_BUFFER_ATR": float(prod_cfg["sl_buffer_atr"]),
+            "TP1_MULT": float(prod_cfg["tp1_mult"]),
+            "TP2_MULT": float(prod_cfg["tp2_mult"]),
+            "EN_SWEEP": int(prod_cfg["en_sweep"]),
+            "EN_SQUEEZE": int(prod_cfg["en_squeeze"]),
+            "EN_PULLBACK": int(prod_cfg["en_pullback"]),
+            "OOS_WIN_PCT": oos_win_pct,
+            "OOS_EXP_R": oos_exp_r,
+            "OOS_PF": oos_pf,
+            "OOS_MAX_DD_R": oos_max_dd,
+            "OOS_TRADES": oos_trades,
             "STATUS": "WF_OPTIMIZED",
         }
     else:
-        win_p = float(best_eval["win_pct"]) if best_eval else 0.0
-        exp_r = float(best_eval["exp_r"]) if best_eval else 0.0
-        trd = int(best_eval["trades"]) if best_eval else 0
         row = {
             "SYMBOL": sym,
             "TIMEFRAME": tf_label,
-            "MIN_SCORE": 68,
+            "MIN_SCORE": 76,
             "VWAP_PERIOD": 50,
             "SL_BUFFER_ATR": 0.25,
-            "TP1_MULT": 1.5,
-            "TP2_MULT": 2.5,
-            "EN_SWEEP": 1,
+            "TP1_MULT": 1.8,
+            "TP2_MULT": 3.0,
+            "EN_SWEEP": 0,
             "EN_SQUEEZE": 1,
             "EN_PULLBACK": 1,
-            "OOS_WIN_PCT": win_p,
-            "OOS_EXP_R": exp_r,
-            "OOS_TRADES": trd,
-            "STATUS": "FALLBACK_DEFAULT",
+            "OOS_WIN_PCT": oos_win_pct,
+            "OOS_EXP_R": oos_exp_r,
+            "OOS_PF": oos_pf,
+            "OOS_MAX_DD_R": oos_max_dd,
+            "OOS_TRADES": oos_trades,
+            "STATUS": "DEFENSIVE_FILTER",
         }
 
     return row, ml_ev
@@ -604,26 +625,34 @@ def _train_purged_cv_models(events_df: pd.DataFrame) -> Dict[str, Any]:
     base_exp = float(np.mean(r_v))
     base_win = float(100.0 * np.mean(y_v))
 
-    # Fine quantile + grid threshold search on purged OOS predictions (keep >= 30% of signals)
+    # Fine quantile + grid threshold search on purged OOS predictions (keep >= 35% of signals)
     q_grid = [round(float(np.quantile(p_lr, q)), 2) for q in np.linspace(0.15, 0.70, 12)]
     f_grid = [round(float(x), 2) for x in np.arange(0.32, 0.65, 0.02)]
-    cand_thresh = sorted(set(x for x in (q_grid + f_grid) if 0.25 <= x <= 0.65))
+    cand_thresh = sorted(set(x for x in (q_grid + f_grid) if 0.28 <= x <= 0.65))
 
-    best_thresh = round(float(np.clip(np.quantile(p_lr, 0.25), 0.32, 0.55)), 2)
+    tail_veto_thresh = round(float(np.clip(np.quantile(p_lr, 0.15), 0.28, 0.48)), 2)
+    best_thresh = tail_veto_thresh
     best_exp = base_exp
     best_win = base_win
     best_kept = 1.0
-    for th in cand_thresh:
-        mask = p_lr >= th
-        kept_frac = float(np.mean(mask))
-        if kept_frac < 0.30 or int(np.sum(mask)) < 12:
-            continue
-        th_exp = float(np.mean(r_v[mask]))
-        if th_exp > best_exp:
-            best_exp = th_exp
-            best_win = float(100.0 * np.mean(y_v[mask]))
-            best_thresh = round(float(th), 2)
-            best_kept = round(kept_frac, 3)
+    if auc_lr >= 0.51:
+        for th in cand_thresh:
+            mask = p_lr >= th
+            kept_frac = float(np.mean(mask))
+            if kept_frac < 0.35 or int(np.sum(mask)) < 12:
+                continue
+            th_exp = float(np.mean(r_v[mask]))
+            if th_exp >= base_exp + 0.010 and th_exp > best_exp:
+                best_exp = th_exp
+                best_win = float(100.0 * np.mean(y_v[mask]))
+                best_thresh = round(float(th), 2)
+                best_kept = round(kept_frac, 3)
+
+    if best_thresh == tail_veto_thresh and np.any(p_lr >= tail_veto_thresh):
+        m_v = p_lr >= tail_veto_thresh
+        best_exp = float(np.mean(r_v[m_v]))
+        best_win = float(100.0 * np.mean(y_v[m_v]))
+        best_kept = round(float(np.mean(m_v)), 3)
 
     # Fit final production StandardScaler + LogisticRegression on full dataset
     final_scaler = StandardScaler()
@@ -694,18 +723,20 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
                     {
                         "SYMBOL": sym,
                         "TIMEFRAME": tf_lbl,
-                        "MIN_SCORE": 68,
+                        "MIN_SCORE": 76,
                         "VWAP_PERIOD": 50,
                         "SL_BUFFER_ATR": 0.25,
-                        "TP1_MULT": 1.5,
-                        "TP2_MULT": 2.5,
-                        "EN_SWEEP": 1,
+                        "TP1_MULT": 1.8,
+                        "TP2_MULT": 3.0,
+                        "EN_SWEEP": 0,
                         "EN_SQUEEZE": 1,
                         "EN_PULLBACK": 1,
                         "OOS_WIN_PCT": 0.0,
                         "OOS_EXP_R": 0.0,
+                        "OOS_PF": 0.0,
+                        "OOS_MAX_DD_R": 0.0,
                         "OOS_TRADES": 0,
-                        "STATUS": "FALLBACK_DEFAULT",
+                        "STATUS": "DEFENSIVE_FILTER",
                     }
                 )
                 continue
@@ -717,37 +748,41 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
                 all_ml_events.append(ev_df)
                 per_sym_events[sym].append(ev_df)
 
-    # Train Universal Pooled GLOBAL ML Meta-Model
+    # Train Universal Pooled GLOBAL ML Meta-Model on Intraday (M15+H1) Regime-Matched events
     global_model: Dict[str, Any] = {
         "ok": False,
-        "ml_min_prob": 0.50,
+        "ml_min_prob": 0.35,
         "intercept": 0.0,
         "means": [0.0] * 10,
         "stds": [1.0] * 10,
         "weights": [0.0] * 10,
     }
-    if all_ml_events:
-        pooled = pd.concat(all_ml_events, ignore_index=True)
-        trained_global = _train_purged_cv_models(pooled)
+    pooled_all_raw = pd.concat(all_ml_events, ignore_index=True) if all_ml_events else pd.DataFrame()
+    intraday_ev = pooled_all_raw[pooled_all_raw["timeframe"].isin(["M15", "H1"])].copy() if not pooled_all_raw.empty else pd.DataFrame()
+    train_pool = intraday_ev if len(intraday_ev) >= 100 else pooled_all_raw
+
+    if not train_pool.empty:
+        trained_global = _train_purged_cv_models(train_pool)
         if trained_global.get("ok"):
             global_model = trained_global
             print(
-                f"GLOBAL Meta-Model: samples={global_model['samples']}, "
+                f"GLOBAL Meta-Model (Intraday): samples={global_model['samples']}, "
                 f"AUC_LR={global_model['auc_lr']}, AUC_GB={global_model['auc_gb']}, "
                 f"BaseExp={global_model['base_oos_exp_r']:+.3f}R -> "
                 f"ML_Exp={global_model['ml_oos_exp_r']:+.3f}R (P>={global_model['ml_min_prob']:.2f})"
             )
 
-    # Train Asset-Class Meta-Models (CRYPTO, METALS, ENERGY, FX, INDEX)
+    # Train Asset-Class Meta-Models (CRYPTO, METALS, ENERGY, FX, INDEX) on intraday events where sufficient
     ac_models: Dict[str, Dict[str, Any]] = {}
-    if all_ml_events:
-        pooled_all = pd.concat(all_ml_events, ignore_index=True)
-        for ac, ac_df in pooled_all.groupby("asset_class"):
+    if not pooled_all_raw.empty:
+        for ac, ac_full_df in pooled_all_raw.groupby("asset_class"):
+            ac_intra = ac_full_df[ac_full_df["timeframe"].isin(["M15", "H1"])]
+            ac_df = ac_intra if len(ac_intra) >= 100 else ac_full_df
             ac_res = _train_purged_cv_models(ac_df)
             ac_valid = bool(
                 ac_res.get("ok")
                 and ac_res["ml_oos_exp_r"] > ac_res["base_oos_exp_r"]
-                and ac_res["auc_lr"] >= 0.50
+                and ac_res["auc_lr"] >= 0.505
             )
             ac_res["validated"] = ac_valid
             ac_models[str(ac)] = ac_res
@@ -777,6 +812,8 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
         ac = WATCHLIST[sym]["asset_class"]
         evs = per_sym_events.get(sym, [])
         merged_sym = pd.concat(evs, ignore_index=True) if evs else pd.DataFrame()
+        sym_intra = merged_sym[merged_sym["timeframe"].isin(["M15", "H1"])] if not merged_sym.empty else pd.DataFrame()
+        sym_train = sym_intra if len(sym_intra) >= 75 else merged_sym
 
         chosen_model = global_model
         sym_min_prob = float(global_model["ml_min_prob"])
@@ -789,8 +826,8 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
             used_model = f"ASSET_CLASS({ac.upper()}, P>={sym_min_prob:.2f})"
 
         sym_res: Dict[str, Any] = {}
-        if len(merged_sym) >= 60:
-            sym_res = _train_purged_cv_models(merged_sym)
+        if len(sym_train) >= 60:
+            sym_res = _train_purged_cv_models(sym_train)
             # Strict OOS acceptance: must beat AUC >= 0.53 AND genuinely improve OOS expectancy
             if (
                 sym_res.get("ok")
@@ -804,14 +841,14 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
             else:
                 sym_ml_summary[sym] = {
                     "inherited": used_model,
-                    "samples": len(merged_sym),
+                    "samples": len(sym_train),
                     "sym_auc_lr": sym_res.get("auc_lr"),
                     "sym_base_exp_r": sym_res.get("base_oos_exp_r"),
                     "sym_ml_exp_r": sym_res.get("ml_oos_exp_r"),
                     "ok": sym_res.get("ok", False),
                 }
         else:
-            sym_ml_summary[sym] = {"inherited": used_model, "samples": len(merged_sym)}
+            sym_ml_summary[sym] = {"inherited": used_model, "samples": len(sym_train)}
 
         ml_rows.append(_format_ml_csv_row(sym, chosen_model))
         exported_models[sym] = _pack_model(chosen_model, used_model)
@@ -822,22 +859,57 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
                 r["ML_MIN_PROB"] = sym_min_prob
                 r["ML_MODEL"] = used_model
 
+    # Compute Walk-Forward Portfolio Audit Summary & Per-Playbook Breakdown
+    intra_cfgs = [r for r in opt_rows if r["TIMEFRAME"] in ("M15", "H1") and r.get("OOS_TRADES", 0) > 0]
+    wf_opt_cnt = sum(1 for r in intra_cfgs if r["STATUS"] == "WF_OPTIMIZED")
+    def_cnt = sum(1 for r in intra_cfgs if r["STATUS"] == "DEFENSIVE_FILTER")
+    tot_intra_trades = sum(int(r.get("OOS_TRADES", 0)) for r in intra_cfgs)
+    avg_intra_win = round(float(np.mean([r["OOS_WIN_PCT"] for r in intra_cfgs])), 1) if intra_cfgs else 0.0
+    avg_intra_exp = round(float(np.mean([r["OOS_EXP_R"] for r in intra_cfgs])), 3) if intra_cfgs else 0.0
+    avg_intra_pf = round(float(np.mean([r.get("OOS_PF", 1.0) for r in intra_cfgs])), 2) if intra_cfgs else 0.0
+
+    wf_summary = {
+        "v3_regime_matched": True,
+        "intraday_configs_total": len(intra_cfgs),
+        "wf_optimized_count": wf_opt_cnt,
+        "defensive_filter_count": def_cnt,
+        "intraday_oos_trades": tot_intra_trades,
+        "intraday_avg_win_pct": avg_intra_win,
+        "intraday_avg_exp_r": avg_intra_exp,
+        "intraday_avg_pf": avg_intra_pf,
+    }
+
+    playbook_stats: Dict[str, Any] = {}
+    if not intraday_ev.empty:
+        for pb, p_df in intraday_ev.groupby("playbook"):
+            rv = p_df["r_net"].values.astype(float)
+            gp = float(np.sum(rv[rv > 0]))
+            gl = float(abs(np.sum(rv[rv < 0])))
+            playbook_stats[str(pb)] = {
+                "trades": int(len(rv)),
+                "win_pct": round(100.0 * float(np.mean(rv > 0)), 1),
+                "exp_r": round(float(np.mean(rv)), 3),
+                "pf": round(min(9.99, gp / max(gl, 1e-6)), 2) if gp > 0 else 0.0,
+            }
+
     # Add GLOBAL default row to OptimizedConfig.csv
     opt_rows.append(
         {
             "SYMBOL": "GLOBAL",
             "TIMEFRAME": "ALL",
-            "MIN_SCORE": 68,
+            "MIN_SCORE": 65,
             "VWAP_PERIOD": 50,
             "SL_BUFFER_ATR": 0.25,
-            "TP1_MULT": 1.5,
-            "TP2_MULT": 2.5,
+            "TP1_MULT": 1.8,
+            "TP2_MULT": 3.0,
             "EN_SWEEP": 1,
             "EN_SQUEEZE": 1,
             "EN_PULLBACK": 1,
             "ML_MIN_PROB": float(global_model["ml_min_prob"]),
-            "OOS_WIN_PCT": float(global_model.get("ml_oos_win_pct", 0.0)),
-            "OOS_EXP_R": float(global_model.get("ml_oos_exp_r", 0.0)),
+            "OOS_WIN_PCT": avg_intra_win,
+            "OOS_EXP_R": avg_intra_exp,
+            "OOS_PF": avg_intra_pf,
+            "OOS_MAX_DD_R": 0.0,
             "OOS_TRADES": int(global_model.get("oos_samples", 0)),
             "STATUS": "GLOBAL_MODEL",
         }
@@ -845,7 +917,7 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
 
     # Export data/OptimizedConfig.csv
     cfg_lines = [
-        f"# LeadingConfluencePro Cloud Walk-Forward Optimized Config | Updated UTC: {now_iso}",
+        f"# LeadingConfluencePro v3.0 Nested Walk-Forward Optimized Config | Updated UTC: {now_iso}",
         "SYMBOL,TIMEFRAME,MIN_SCORE,VWAP_PERIOD,SL_BUFFER_ATR,TP1_MULT,TP2_MULT,EN_SWEEP,EN_SQUEEZE,EN_PULLBACK,ML_MIN_PROB,OOS_WIN_PCT,OOS_EXP_R,STATUS",
     ]
     for r in opt_rows:
@@ -853,7 +925,7 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
             f"{r['SYMBOL']},{r['TIMEFRAME']},{r['MIN_SCORE']},{r['VWAP_PERIOD']},"
             f"{r['SL_BUFFER_ATR']:.2f},{r['TP1_MULT']:.2f},{r['TP2_MULT']:.2f},"
             f"{r['EN_SWEEP']},{r['EN_SQUEEZE']},{r['EN_PULLBACK']},"
-            f"{r.get('ML_MIN_PROB', 0.50):.2f},{r['OOS_WIN_PCT']:.1f},{r['OOS_EXP_R']:.3f},{r['STATUS']}"
+            f"{r.get('ML_MIN_PROB', 0.35):.2f},{r['OOS_WIN_PCT']:.1f},{r['OOS_EXP_R']:.3f},{r['STATUS']}"
         )
     (DATA_DIR / "OptimizedConfig.csv").write_text("\n".join(cfg_lines) + "\n", encoding="utf-8")
 
@@ -867,7 +939,7 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
         + ",".join(f"W{k}" for k in range(10))
     )
     ml_lines = [
-        f"# LeadingConfluencePro Cloud Purged Walk-Forward ML Weights | Updated UTC: {now_iso}",
+        f"# LeadingConfluencePro v3.0 Purged Walk-Forward ML Weights | Updated UTC: {now_iso}",
         ml_header,
     ] + ml_rows
     (DATA_DIR / "MLModelWeights.csv").write_text("\n".join(ml_lines) + "\n", encoding="utf-8")
@@ -880,6 +952,8 @@ def run_ml_optimization_pipeline() -> Dict[str, Any]:
     report = {
         "updated_utc": now_iso,
         "feature_names": FEATURE_NAMES,
+        "wf_portfolio_summary": wf_summary,
+        "playbook_oos_stats": playbook_stats,
         "global_model": {k: v for k, v in global_model.items() if k not in ("means", "stds", "weights")},
         "global_feature_weights": feat_weights,
         "asset_class_models": {
