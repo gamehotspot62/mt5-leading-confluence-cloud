@@ -1,10 +1,10 @@
-# LeadingConfluencePro Cloud Macro/OnChain/ETF/COT Feed | Updated UTC: 2026-11-23T22:35:49Z
+# LeadingConfluencePro Cloud Macro/OnChain/ETF/COT Feed | Updated UTC: 2026-11-23T23:35:30Z
 SYMBOL,BIAS_SCORE,SOURCE_NOTE
 XAUUSD,-28,COT100_ETF-25_VIXBack
-BTCUSD,-17,MVRV_Value_ExOutflow_ExtremeFearContrarian_COT3
+BTCUSD,-16,MVRV_Value_ExOutflow_ExtremeFearContrarian_COT3
 ETHUSD,-3,MVRV_Value_ExNeut_ExtremeFearContrarian_ETF-23
 XAGUSD,-21,COT98_ETF-25_VIXBack
-USOIL,-14,COT99_ETF-11_VIXBack
+USOIL,-13,COT99_ETF-11_VIXBack
 EURUSD,-23,COT1_ETF-25_VIXBack
 GBPUSD,-21,COT22_ETF-25_VIXBack
 USDJPY,3,COT88_ETF-1_VIXBack

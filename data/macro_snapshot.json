@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-23T22:35:49Z",
+  "updated_utc": "2026-11-23T23:35:30Z",
   "global_bias": -10,
   "global_regime": {
     "vix": 26.62,
@@ -13,14 +13,14 @@
     "yield_curve_10y2y": 0.29,
     "fed_net_liq_trillion": 5.824,
     "fed_net_liq_4w_pct": 0.4,
-    "dxy": 104.35,
-    "dxy_ret20_pct": 2.34,
+    "dxy": 104.32,
+    "dxy_ret20_pct": 2.31,
     "breadth_rsp_spy_20d_pct": 3.78,
     "credit_hyg_tlt_20d_pct": -0.89,
     "tech_qqq_xlp_20d_pct": -11.04,
     "stablecoins": {
-      "total_usd_b": 282.75,
-      "chg_7d_pct": -1.51,
+      "total_usd_b": 282.74,
+      "chg_7d_pct": -1.52,
       "chg_30d_pct": -5.96
     },
     "fear_greed": {
@@ -56,7 +56,7 @@
     },
     "BTCUSD": {
       "asset_class": "crypto",
-      "bias_score": -17,
+      "bias_score": -16,
       "note": "MVRV_Value_ExOutflow_ExtremeFearContrarian_COT3",
       "cot": {
         "ok": true,
@@ -122,8 +122,8 @@
         "netflow_pts": -2.9,
         "ex_supply_30d_pct": -3.81,
         "stablecoins_30d_pct": -5.96,
-        "funding_8h": -2.5e-05,
-        "funding_pts": 0.5,
+        "funding_8h": -7e-06,
+        "funding_pts": 0.1,
         "fear_greed": 11.0
       }
     },
@@ -154,7 +154,7 @@
     },
     "USOIL": {
       "asset_class": "energy",
-      "bias_score": -14,
+      "bias_score": -13,
       "note": "COT99_ETF-11_VIXBack",
       "cot": {
         "ok": true,
