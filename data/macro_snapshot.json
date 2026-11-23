@@ -1,10 +1,10 @@
 {
-  "updated_utc": "2026-11-23T17:56:21Z",
+  "updated_utc": "2026-11-23T18:38:16Z",
   "global_bias": -9,
   "global_regime": {
-    "vix": 27.66,
-    "vix3m": 25.79,
-    "vix_vix3m_ratio": 1.073,
+    "vix": 26.27,
+    "vix3m": 24.99,
+    "vix_vix3m_ratio": 1.051,
     "vix_state": "BACKWARDATION_RISK_OFF",
     "hy_oas_pct": 3.76,
     "hy_oas_chg20": 0.38,
@@ -15,11 +15,11 @@
     "fed_net_liq_4w_pct": 0.4,
     "dxy": 104.47,
     "dxy_ret20_pct": 2.46,
-    "breadth_rsp_spy_20d_pct": 3.64,
-    "credit_hyg_tlt_20d_pct": -0.55,
-    "tech_qqq_xlp_20d_pct": -10.94,
+    "breadth_rsp_spy_20d_pct": 3.69,
+    "credit_hyg_tlt_20d_pct": -0.69,
+    "tech_qqq_xlp_20d_pct": -11.2,
     "stablecoins": {
-      "total_usd_b": 282.76,
+      "total_usd_b": 282.77,
       "chg_7d_pct": -1.51,
       "chg_30d_pct": -5.95
     },
@@ -46,8 +46,8 @@
         {
           "ticker": "GLD",
           "ok": true,
-          "cmf10": -0.566,
-          "ret10_pct": -11.83,
+          "cmf10": -0.582,
+          "ret10_pct": -11.93,
           "score": -25.0
         }
       ],
@@ -71,15 +71,15 @@
         {
           "ticker": "IBIT",
           "ok": true,
-          "cmf10": -0.312,
-          "ret10_pct": -17.57,
+          "cmf10": -0.33,
+          "ret10_pct": -17.94,
           "score": -25.0
         },
         {
           "ticker": "FBTC",
           "ok": true,
-          "cmf10": -0.332,
-          "ret10_pct": -17.53,
+          "cmf10": -0.352,
+          "ret10_pct": -17.89,
           "score": -25.0
         }
       ],
@@ -108,13 +108,13 @@
         {
           "ticker": "ETHA",
           "ok": true,
-          "cmf10": -0.223,
-          "ret10_pct": -18.08,
-          "score": -22.1
+          "cmf10": -0.228,
+          "ret10_pct": -18.14,
+          "score": -22.2
         }
       ],
       "cot_score": 0.0,
-      "etf_score": -22.1,
+      "etf_score": -22.2,
       "onchain": {
         "mvrv": 0.852,
         "mvrv_pts": 30.0,
@@ -122,8 +122,8 @@
         "netflow_pts": -2.9,
         "ex_supply_30d_pct": -3.81,
         "stablecoins_30d_pct": -5.95,
-        "funding_8h": -5e-05,
-        "funding_pts": 1.0,
+        "funding_8h": -4.6e-05,
+        "funding_pts": 0.9,
         "fear_greed": 11.0
       }
     },
@@ -144,8 +144,8 @@
         {
           "ticker": "SLV",
           "ok": true,
-          "cmf10": -0.602,
-          "ret10_pct": -18.86,
+          "cmf10": -0.611,
+          "ret10_pct": -19.03,
           "score": -25.0
         }
       ],
@@ -154,7 +154,7 @@
     },
     "USOIL": {
       "asset_class": "energy",
-      "bias_score": -10,
+      "bias_score": -11,
       "note": "COT99_ETF-6_VIXBack",
       "cot": {
         "ok": true,
@@ -169,13 +169,13 @@
         {
           "ticker": "USO",
           "ok": true,
-          "cmf10": 0.055,
-          "ret10_pct": -5.47,
-          "score": -5.7
+          "cmf10": 0.044,
+          "ret10_pct": -5.63,
+          "score": -6.4
         }
       ],
       "cot_score": 16.6,
-      "etf_score": -5.7
+      "etf_score": -6.4
     },
     "EURUSD": {
       "asset_class": "fx",
@@ -194,8 +194,8 @@
         {
           "ticker": "FXE",
           "ok": true,
-          "cmf10": -0.53,
-          "ret10_pct": -2.96,
+          "cmf10": -0.518,
+          "ret10_pct": -2.92,
           "score": -25.0
         }
       ],
@@ -230,7 +230,7 @@
     "USDJPY": {
       "asset_class": "fx",
       "bias_score": 3,
-      "note": "COT88_ETF-2_VIXBack",
+      "note": "COT88_ETF-1_VIXBack",
       "cot": {
         "ok": true,
         "report_date": "2026-11-17",
@@ -244,18 +244,18 @@
         {
           "ticker": "FXY",
           "ok": true,
-          "cmf10": -0.017,
-          "ret10_pct": -0.84,
-          "score": -2.0
+          "cmf10": 0.001,
+          "ret10_pct": -0.79,
+          "score": -1.2
         }
       ],
       "cot_score": -12.4,
-      "etf_score": -2.0
+      "etf_score": -1.2
     },
     "US500": {
       "asset_class": "index",
-      "bias_score": -32,
-      "note": "COT26_ETF-22_VIXBack",
+      "bias_score": -31,
+      "note": "COT26_ETF-21_VIXBack",
       "cot": {
         "ok": true,
         "report_date": "2026-11-17",
@@ -269,20 +269,20 @@
         {
           "ticker": "SPY",
           "ok": true,
-          "cmf10": -0.378,
-          "ret10_pct": -4.05,
-          "score": -23.1
+          "cmf10": -0.368,
+          "ret10_pct": -3.98,
+          "score": -22.5
         },
         {
           "ticker": "RSP",
           "ok": true,
-          "cmf10": -0.342,
-          "ret10_pct": -3.83,
-          "score": -21.1
+          "cmf10": -0.316,
+          "ret10_pct": -3.69,
+          "score": -19.8
         }
       ],
       "cot_score": -19.6,
-      "etf_score": -22.1
+      "etf_score": -21.1
     },
     "US100": {
       "asset_class": "index",
@@ -302,12 +302,12 @@
           "ticker": "QQQ",
           "ok": true,
           "cmf10": -0.303,
-          "ret10_pct": -4.2,
-          "score": -19.9
+          "ret10_pct": -4.23,
+          "score": -20.0
         }
       ],
       "cot_score": 15.9,
-      "etf_score": -19.9
+      "etf_score": -20.0
     }
   }
 }
