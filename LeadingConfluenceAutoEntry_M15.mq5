@@ -7,9 +7,9 @@
 //+------------------------------------------------------------------+
 #property copyright "LeadingConfluencePro Quantitative Architecture"
 #property link      "https://github.com/gamehotspot62/mt5-leading-confluence-cloud"
-#property version   "1.00"
-#property description "Optional M15 Auto-Entry EA paired with LeadingConfluencePro.ex5."
-#property description "Evaluates strictly shift=1 (closed M15 bar) and manages TP1 partial + BE."
+#property version   "1.10"
+#property description "Optional M15 Auto-Entry EA paired with LeadingConfluencePro.ex5 (v2.10)."
+#property description "Evaluates strictly shift=1 (closed bar) and syncs TP1 partial, BE, indicator trail & exit markers."
 
 //--- Input Parameters
 input group "=== 1. Signal Source & Entry Timeframe ==="
@@ -22,14 +22,17 @@ input bool            InpDryRunLogOnly        = false;                  // Dry-R
 input group "=== 2. Risk & Trade Execution ==="
 input double          InpRiskPercent          = 0.50;                   // Equity Risk % Per Trade (0 = Fixed Lot)
 input double          InpFixedLotFallback     = 0.01;                   // Fixed Lot Size if Risk% <= 0
+input double          InpMaxLots              = 10.00;                  // Maximum Lots Cap
 input int             InpMaxSpreadPoints      = 60;                     // Maximum Allowed Spread (Points)
 input int             InpMaxPositionsPerSymbol= 1;                      // Max Open EA Positions on This Symbol
 input bool            InpCloseOppositeOnSignal= false;                  // Close Opposing Position Before Opening New Signal
 input int             InpSlippagePoints       = 20;                     // Max Order Slippage (Points)
 
-input group "=== 3. TP1 Partial Close & Breakeven Management ==="
+input group "=== 3. TP1 Partial Close, Breakeven & Indicator Exits ==="
 input bool            InpMoveSLToBEAtTP1      = true;                   // Move Stop Loss to Breakeven When TP1 Reached
 input double          InpPartialClosePctAtTP1 = 50.0;                   // % Volume to Close at TP1 (0 = Disable Partial)
+input bool            InpFollowIndicatorExits = true;                   // Close Position When Indicator Plots Exit Marker (Buf 6)
+input bool            InpFollowIndicatorTrail = true;                   // Sync Position SL Tightening With Indicator Trail (Buf 7)
 
 //--- Runtime Globals
 int      g_indHandle        = INVALID_HANDLE;
@@ -49,18 +52,30 @@ ENUM_ORDER_TYPE_FILLING GetOrderFilling()
 }
 
 //+------------------------------------------------------------------+
+//| Helper: Floor Raw Lots to Broker Step, Min & Cap (SSRN Core)     |
+//+------------------------------------------------------------------+
+double CoreFloorLots(const double raw, const double minimum, const double step, const double maximum)
+{
+   if(raw <= 0.0 || minimum <= 0.0 || step <= 0.0 || maximum < minimum) return 0.0;
+   double capped = MathMin(raw, maximum);
+   double lots   = MathFloor((capped + step * 1.0e-9) / step) * step;
+   if(lots + step * 1.0e-8 < minimum) return 0.0;
+   return NormalizeDouble(lots, 8);
+}
+
+//+------------------------------------------------------------------+
 //| Helper: Normalize Volume to Broker Step & Limits                 |
 //+------------------------------------------------------------------+
 double NormalizeLots(const double rawLots)
 {
    double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double maxLot  = MathMin(InpMaxLots, SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX));
    double stepLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
    if(stepLot <= 0.0) stepLot = 0.01;
+   if(maxLot < minLot) maxLot = minLot;
 
-   double lots = MathFloor(rawLots / stepLot + 1e-9) * stepLot;
-   if(lots < minLot) lots = minLot;
-   if(lots > maxLot) lots = maxLot;
+   double floored = CoreFloorLots(rawLots, minLot, stepLot, maxLot);
+   if(floored <= 0.0) floored = minLot;
 
    int stepDigits = 2;
    if(stepLot >= 1.0)       stepDigits = 0;
@@ -68,29 +83,41 @@ double NormalizeLots(const double rawLots)
    else if(stepLot >= 0.01) stepDigits = 2;
    else                     stepDigits = 3;
 
-   return NormalizeDouble(lots, stepDigits);
+   return NormalizeDouble(floored, stepDigits);
 }
 
 //+------------------------------------------------------------------+
-//| Helper: Calculate Risk-Based Lot Size from SL Distance           |
+//| Helper: Calculate Risk-Based Lot Size via OrderCalcProfit        |
 //+------------------------------------------------------------------+
-double ComputeLotSize(const double slDist)
+double ComputeLotSize(const bool isBuy, const double entryPrice, const double slPrice)
 {
-   if(InpRiskPercent <= 0.0 || slDist <= 0.0)
+   double slDist = MathAbs(entryPrice - slPrice);
+   if(InpRiskPercent <= 0.0 || slDist <= 0.0 || entryPrice <= 0.0 || slPrice <= 0.0)
       return NormalizeLots(InpFixedLotFallback);
 
-   double tickVal = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-   double tickSz  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   if(tickVal <= 0.0 || tickSz <= 0.0)
-      return NormalizeLots(InpFixedLotFallback);
+   double equity     = AccountInfoDouble(ACCOUNT_EQUITY);
+   double riskMoney  = equity * (InpRiskPercent / 100.0);
+   double minLot     = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double lossPerLot = 0.0;
 
-   double lossPerLot = (slDist / tickSz) * tickVal;
+   double lossRef = 0.0;
+   ENUM_ORDER_TYPE oType = isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   if(minLot > 0.0 && OrderCalcProfit(oType, _Symbol, minLot, entryPrice, slPrice, lossRef))
+      lossPerLot = MathAbs(lossRef) / minLot;
+
+   if(lossPerLot <= 0.0)
+   {
+      double tickVal = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+      double tickSz  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+      if(tickVal <= 0.0 || tickSz <= 0.0)
+         return NormalizeLots(InpFixedLotFallback);
+      lossPerLot = (slDist / tickSz) * tickVal;
+   }
+
    if(lossPerLot <= 0.0)
       return NormalizeLots(InpFixedLotFallback);
 
-   double equity    = AccountInfoDouble(ACCOUNT_EQUITY);
-   double riskMoney = equity * (InpRiskPercent / 100.0);
-   double rawLots   = riskMoney / lossPerLot;
+   double rawLots = riskMoney / lossPerLot;
    return NormalizeLots(rawLots);
 }
 
@@ -304,6 +331,103 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
+//| Helper: Sync Open Positions With Indicator Exits & Trail (Buf 6/7)|
+//+------------------------------------------------------------------+
+void SyncIndicatorExitAndTrail(const datetime closedBarTime)
+{
+   if((!InpFollowIndicatorExits && !InpFollowIndicatorTrail) || InpDryRunLogOnly || g_indHandle == INVALID_HANDLE)
+      return;
+
+   double exitArr[1], trailArr[1];
+   bool hasExit  = (InpFollowIndicatorExits && CopyBuffer(g_indHandle, 6, 1, 1, exitArr)  == 1 && exitArr[0]  != EMPTY_VALUE && exitArr[0]  > 0.0);
+   bool hasTrail = (InpFollowIndicatorTrail && CopyBuffer(g_indHandle, 7, 1, 1, trailArr) == 1 && trailArr[0] != EMPTY_VALUE && trailArr[0] > 0.0);
+   if(!hasExit && !hasTrail)
+      return;
+
+   long stopPts   = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   long freezePts = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+   double minDist = (double)MathMax(stopPts, freezePts) * _Point + 2.0 * SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   double tickSz  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(tickSz <= 0.0) tickSz = _Point;
+
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
+
+      datetime openedAt = (datetime)PositionGetInteger(POSITION_TIME);
+      if(openedAt >= closedBarTime)
+         continue;
+
+      ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+
+      if(hasExit)
+      {
+         MqlTradeRequest cReq;
+         MqlTradeResult  cRes;
+         ZeroMemory(cReq);
+         ZeroMemory(cRes);
+         cReq.action       = TRADE_ACTION_DEAL;
+         cReq.position     = ticket;
+         cReq.symbol       = _Symbol;
+         cReq.volume       = PositionGetDouble(POSITION_VOLUME);
+         cReq.type         = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+         cReq.price        = (posType == POSITION_TYPE_BUY) ? bid : ask;
+         cReq.deviation    = (ulong)MathMax(0, InpSlippagePoints);
+         cReq.magic        = InpMagicNumber;
+         cReq.type_filling = GetOrderFilling();
+         cReq.comment      = "LCP_v210_IndExit";
+
+         if(!OrderSend(cReq, cRes))
+            PrintFormat("LeadingConfluenceAutoEntry_M15: Indicator exit close failed (ticket=%I64u, ret=%u)", ticket, cRes.retcode);
+         else
+         {
+            GlobalVariableDel("LCP_EA_TP1_" + IntegerToString((long)ticket));
+            GlobalVariableDel("LCP_EA_BE_"  + IntegerToString((long)ticket));
+            PrintFormat("LeadingConfluenceAutoEntry_M15: Closed #%I64u on v2.10 indicator Exit marker", ticket);
+         }
+         continue;
+      }
+
+      if(hasTrail)
+      {
+         double curSL = PositionGetDouble(POSITION_SL);
+         double curTP = PositionGetDouble(POSITION_TP);
+         double rawT  = trailArr[0];
+         double tSL   = (posType == POSITION_TYPE_BUY)
+                        ? NormalizeDouble(MathFloor(rawT / tickSz + 1e-9) * tickSz, _Digits)
+                        : NormalizeDouble(MathCeil(rawT / tickSz - 1e-9) * tickSz, _Digits);
+
+         bool tighter = (posType == POSITION_TYPE_BUY)
+                        ? (tSL > curSL + tickSz * 0.5 && (bid - tSL) >= minDist && (curSL <= 0.0 || (bid - curSL) >= minDist))
+                        : ((curSL <= 0.0 || tSL < curSL - tickSz * 0.5) && (tSL - ask) >= minDist && (curSL <= 0.0 || (curSL - ask) >= minDist));
+
+         if(tighter && PositionSelectByTicket(ticket))
+         {
+            MqlTradeRequest mReq;
+            MqlTradeResult  mRes;
+            ZeroMemory(mReq);
+            ZeroMemory(mRes);
+            mReq.action   = TRADE_ACTION_SLTP;
+            mReq.position = ticket;
+            mReq.symbol   = _Symbol;
+            mReq.sl       = tSL;
+            mReq.tp       = curTP;
+            if(!OrderSend(mReq, mRes))
+               PrintFormat("LeadingConfluenceAutoEntry_M15: Indicator trail SL sync failed (ticket=%I64u, ret=%u)", ticket, mRes.retcode);
+            else
+               PrintFormat("LeadingConfluenceAutoEntry_M15: Synced #%I64u SL to indicator trail %s", ticket, DoubleToString(tSL, _Digits));
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Expert tick function                                             |
 //+------------------------------------------------------------------+
 void OnTick()
@@ -315,20 +439,23 @@ void OnTick()
    if(BarsCalculated(g_indHandle) < 80)
       return;
 
-   // Evaluate strictly once per newly closed M15 candle (shift = 1)
+   // Evaluate strictly once per newly closed candle (shift = 1)
    datetime closedBarTime = iTime(_Symbol, InpEntryTimeframe, 1);
    if(closedBarTime <= 0 || closedBarTime == g_lastProcessedBar)
       return;
    g_lastProcessedBar = closedBarTime;
 
+   SyncIndicatorExitAndTrail(closedBarTime);
+
+   // Read LeadingConfluencePro v2.10 buffer layout (16 buffers)
    double buyArr[1], sellArr[1], scoreArr[1], slArr[1], tp1Arr[1], tp2Arr[1], mlArr[1];
    if(CopyBuffer(g_indHandle, 0,  1, 1, buyArr)   != 1) return;
    if(CopyBuffer(g_indHandle, 1,  1, 1, sellArr)  != 1) return;
-   if(CopyBuffer(g_indHandle, 5,  1, 1, scoreArr) != 1) return;
-   if(CopyBuffer(g_indHandle, 6,  1, 1, slArr)    != 1) return;
-   if(CopyBuffer(g_indHandle, 7,  1, 1, tp1Arr)   != 1) return;
-   if(CopyBuffer(g_indHandle, 8,  1, 1, tp2Arr)   != 1) return;
-   if(CopyBuffer(g_indHandle, 10, 1, 1, mlArr)    != 1) return;
+   if(CopyBuffer(g_indHandle, 8,  1, 1, scoreArr) != 1) return;
+   if(CopyBuffer(g_indHandle, 9,  1, 1, slArr)    != 1) return;
+   if(CopyBuffer(g_indHandle, 10, 1, 1, tp1Arr)   != 1) return;
+   if(CopyBuffer(g_indHandle, 11, 1, 1, tp2Arr)   != 1) return;
+   if(CopyBuffer(g_indHandle, 13, 1, 1, mlArr)    != 1) return;
 
    bool isBuy  = (buyArr[0]  != EMPTY_VALUE && buyArr[0]  > 0.0);
    bool isSell = (sellArr[0] != EMPTY_VALUE && sellArr[0] > 0.0);
@@ -379,7 +506,7 @@ void OnTick()
       return;
    }
 
-   double lots = ComputeLotSize(slDist);
+   double lots = ComputeLotSize(isBuy, entryPrice, slPrice);
 
    if(InpDryRunLogOnly)
    {

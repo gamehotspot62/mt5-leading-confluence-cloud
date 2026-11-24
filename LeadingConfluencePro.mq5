@@ -7,18 +7,17 @@
 //+------------------------------------------------------------------+
 #property copyright "LeadingConfluencePro Quantitative Architecture"
 #property link      "https://github.com/gamehotspot62/mt5-leading-confluence-cloud"
-#property version   "2.02"
-#property description "Universal non-repainting leading confluence indicator v2.01:"
+#property version   "2.10"
+#property description "Universal non-repainting leading confluence indicator v2.10 (Merged SSRN 1.10):"
 #property description "1) BVC + CLV Order Flow Delta & CVD Divergence (microstructure)"
-#property description "2) Wyckoff Liquidity Sweep / SFP Reversal (behavioral stop hunts)"
-#property description "3) Bollinger-Keltner Volatility Squeeze & OLS Momentum"
-#property description "4) Adaptive VWAP Fair Value Bands + VSA Relative Volume + FVG/Disp"
-#property description "5) Kaufman Efficiency Ratio Regime, ATR Percentile & Causal MTF"
-#property description "6) 24/7 Cloud Macro/On-Chain/ETF/COT Bias, Adaptive Params & ML Filter"
+#property description "2) Wyckoff Liquidity Sweep / SFP, Squeeze Breakout & VWAP Pullback"
+#property description "3) SSRN Causal HTF EMA50/200 Regime, Channel Breakout & EMA Pullback"
+#property description "4) Adaptive VWAP + VSA + FVG/Disp + KER + Session/Spread/Shock Hygiene"
+#property description "5) Simulated ATR Trail/Breakeven Exits, Risk Sizing Audit & Cloud ML Filter"
 
 #property indicator_chart_window
-#property indicator_buffers 11
-#property indicator_plots   5
+#property indicator_buffers 16
+#property indicator_plots   8
 
 //--- Plot 0: Confirmed BUY Arrow
 #property indicator_label1  "Confirmed BUY"
@@ -55,6 +54,27 @@
 #property indicator_style5  STYLE_DOT
 #property indicator_width5  1
 
+//--- Plot 5: SSRN Entry EMA
+#property indicator_label6  "SSRN Entry EMA"
+#property indicator_type6   DRAW_LINE
+#property indicator_color6  clrGold
+#property indicator_style6  STYLE_SOLID
+#property indicator_width6  1
+
+//--- Plot 6: Confirmed Exit Marker
+#property indicator_label7  "Confirmed EXIT"
+#property indicator_type7   DRAW_ARROW
+#property indicator_color7  clrOrange
+#property indicator_style7  STYLE_SOLID
+#property indicator_width7  2
+
+//--- Plot 7: Active Simulated Trail / BE Stop
+#property indicator_label8  "Active Trail Stop"
+#property indicator_type8   DRAW_LINE
+#property indicator_color8  clrViolet
+#property indicator_style8  STYLE_DASHDOT
+#property indicator_width8  1
+
 //--- Enumerations
 enum ENUM_STRICTNESS
 {
@@ -77,6 +97,40 @@ enum ENUM_VOL_SOURCE
    VOL_REAL = 2  // Force Real Volume
 };
 
+enum ENUM_MERGE_MODE
+{
+   MERGE_HYBRID_PRO       = 0, // Hybrid Pro (v2.02 + SSRN Playbooks, Filters & Exits)
+   MERGE_SSRN_REGIME_ONLY = 1, // Pure SSRN Regime Trend (ChBreak + EMAPull)
+   MERGE_SSRN_MA_BASELINE = 2  // Pure SSRN Slow MA Baseline Benchmark
+};
+
+enum ENUM_SSRN_ENTRY_POLICY
+{
+   SSRN_BREAKOUT_OR_PULLBACK = 0, // Channel Breakout OR EMA Pullback
+   SSRN_BREAKOUT_ONLY        = 1, // Channel Breakout Only
+   SSRN_PULLBACK_ONLY        = 2  // EMA Pullback Only
+};
+
+enum ENUM_SIDE_POLICY
+{
+   SIDE_BOTH       = 0, // Both Directions (Long & Short)
+   SIDE_LONG_ONLY  = 1, // Long Only
+   SIDE_SHORT_ONLY = 2  // Short Only
+};
+
+enum ENUM_SL_MODE
+{
+   SL_STRUCTURAL_CLAMPED = 0, // v2.02 Structural Clamped SL
+   SL_SSRN_FIXED_ATR     = 1  // SSRN Fixed ATR Multiple SL
+};
+
+enum ENUM_SSRN_TRAIL
+{
+   SSRN_TRAIL_NONE     = 0, // None (Static SL / TP Only)
+   SSRN_TRAIL_ATR      = 1, // ATR Chandelier Trail (After Start-R)
+   SSRN_EXIT_EMA_CLOSE = 2  // Exit on Closed Bar Across Entry EMA
+};
+
 //--- Input Parameters
 input group "=== 1. Confluence & Signal Confirmation ==="
 input ENUM_STRICTNESS InpStrictnessMode           = MODE_BALANCED; // Signal Strictness Preset (Manual Fallback)
@@ -91,6 +145,8 @@ input bool            InpEnableFVGDisplacement    = true;          // Enable Fai
 input group "=== 2. Institutional Fair Value (VWAP) & Volume ==="
 input ENUM_VWAP_MODE  InpVWAPMode                 = VWAP_ROLLING;  // VWAP Anchor Mode
 input int             InpVWAPPeriod               = 50;            // Rolling VWAP Period (Manual Fallback)
+input int             InpVWAPAnchorHour           = 0;             // Session VWAP Anchor Hour (0-23 Server Time)
+input int             InpVWAPMinBars              = 3;             // Minimum Bars In Session Before VWAP Side Filter
 input double          InpVWAPBandMult             = 2.0;           // VWAP Band StdDev Multiplier
 input ENUM_VOL_SOURCE InpVolumeSource             = VOL_AUTO;      // Volume Data Source
 input int             InpVolPeriod                = 20;            // RVOL Baseline Lookback (Bars)
@@ -138,18 +194,89 @@ input bool            InpEnableEmail              = false;         // Email Noti
 input bool            InpEnableSound              = false;         // Play Sound Alert
 input string          InpSoundFile                = "alert2.wav";  // Sound File Name
 
+input group "=== 7. SSRN Hybrid Mode, HTF Regime & Playbooks ==="
+input ENUM_MERGE_MODE       InpMergeMode           = MERGE_HYBRID_PRO;          // Engine Mode (Hybrid Pro / Pure SSRN / Baseline)
+input ENUM_SIDE_POLICY      InpSidePolicy          = SIDE_BOTH;                 // Directional Policy
+input ENUM_TIMEFRAMES       InpSSRNTrendTF         = PERIOD_CURRENT;            // SSRN Regime HTF (PERIOD_CURRENT = Auto Next TF)
+input int                   InpSSRNTrendFast       = 50;                        // SSRN HTF Fast EMA Period
+input int                   InpSSRNTrendSlow       = 200;                       // SSRN HTF Slow EMA Period
+input int                   InpSSRNSlopeBars       = 3;                         // SSRN HTF Fast EMA Slope Lookback (Bars)
+input double                InpSSRNMinSepATR       = 0.10;                      // SSRN Min |EMA50-EMA200|/ATR Separation
+input bool                  InpSSRNHardRegimeOnV2  = false;                     // Require SSRN HTF Alignment on v2.02 Playbooks
+input ENUM_SSRN_ENTRY_POLICY InpSSRNEntryPolicy    = SSRN_BREAKOUT_OR_PULLBACK; // SSRN Entry Pattern Policy
+input bool                  InpEnableSSRNBreakout  = true;                      // Enable SSRN Playbook 4: Channel Breakout
+input int                   InpSSRNBreakoutBars    = 20;                        // SSRN Breakout Channel Lookback (Excl. Signal Bar)
+input double                InpSSRNBreakoutBufATR  = 0.05;                      // SSRN Breakout Buffer (ATR Mult)
+input bool                  InpEnableSSRNPullback  = true;                      // Enable SSRN Playbook 5: EMA Pullback
+input int                   InpSSRNEntryEMA        = 20;                        // SSRN Entry EMA Period
+input int                   InpSSRNPullbackBars    = 3;                         // SSRN Pullback Touch Lookback (Bars)
+input double                InpSSRNPullbackTolATR  = 0.20;                      // SSRN Pullback Band Tolerance (ATR Mult)
+input int                   InpSSRNBaselinePeriod  = 65;                        // SSRN Slow SMA Baseline Period (Benchmark Mode)
+input double                InpSSRNBaselineBufATR  = 0.00;                      // SSRN Baseline Buffer (ATR Mult)
+input bool                  InpShowSSRNEntryEMA    = true;                      // Plot SSRN Entry EMA Line on Chart
+
+input group "=== 8. SSRN Signal Hygiene, Session & Blackout Filters ==="
+input double          InpSSRNMaxSignalRangeATR    = 3.50;          // Max Signal Candle Range (ATR Mult, 0=Off)
+input double          InpSSRNMaxExtensionATR      = 3.00;          // Max Close Distance From Entry EMA (ATR Mult, 0=Off)
+input double          InpSSRNMaxOpenGapATR        = 0.50;          // Max Signal-to-Next-Open Gap (ATR Mult, 0=Off)
+input bool            InpSSRNRequireVWAPSide      = false;         // Require Signal Close on Favorable Side of VWAP
+input bool            InpSSRNUseSpreadFilter      = false;         // Enable Spread/ATR Gate in Hybrid Mode
+input double          InpSSRNMaxSpreadATR         = 0.10;          // Max Allowed Spread (ATR Mult)
+input int             InpMaxSignalsPerDay         = 0;             // Max Confirmed Signals Per Day (0 = Unlimited)
+input bool            InpAllowWeekend             = true;          // Allow Signals on Saturday / Sunday (Server Time)
+input bool            InpUseSessionFilter         = false;         // Enable Broker-Server Session Hour Filter
+input int             InpSessionStartHour         = 0;             // Session Start Hour (0-23 Server Time)
+input int             InpSessionEndHour           = 24;            // Session End Hour (0-24 Server Time)
+input bool            InpUseBlackouts             = false;         // Enable Blackout Window CSV Filter
+input string          InpBlackoutFile             = "SSRN_Blackouts.csv"; // Blackout Windows CSV (start_server,end_server)
+
+input group "=== 9. SSRN Exits, Trailing Stop & Breakeven ==="
+input ENUM_SL_MODE    InpSLMode                   = SL_STRUCTURAL_CLAMPED; // Stop Loss Sizing Method
+input double          InpSSRNStopATR              = 2.50;          // SSRN Fixed Stop Distance (ATR Mult)
+input bool            InpSSRNUseFixedTargets      = true;          // Use TP1 Partial & TP2 Target in Trade Simulation
+input ENUM_SSRN_TRAIL InpSSRNTrailMode            = SSRN_TRAIL_ATR;// Dynamic Trailing / Exit Mode
+input double          InpSSRNTrailStartR          = 1.50;          // Profit R Required Before ATR Trail Activates
+input double          InpSSRNTrailATR             = 3.00;          // ATR Trail Distance From Best Close-Side Extreme
+input bool            InpSSRNUseBreakeven         = true;          // Enable Breakeven Stop Protection
+input double          InpSSRNBreakevenTrigR       = 1.20;          // Profit R Required to Trigger Breakeven
+input double          InpSSRNBreakevenOffR        = 0.02;          // Breakeven Lock Offset (+R)
+input bool            InpSSRNExitOnTrendFlip      = true;          // Simulate Exit When SSRN HTF Regime Flips Against Trade
+input bool            InpSSRNExitOnNeutral        = false;         // Simulate Exit When SSRN HTF Regime Turns Neutral
+input int             InpSSRNMaxHoldBars          = 0;             // Max Hold Bars Before Time Exit (0 = Unlimited)
+input bool            InpShowSSRNExits            = true;          // Plot Confirmed Exit Markers on Chart
+input bool            InpShowSSRNTrailLine        = true;          // Plot Active Simulated Trail / BE Stop Line
+input bool            InpAlertOnExit              = true;          // Include Simulated Exits in Closed-Bar Alert Feed
+
+input group "=== 10. SSRN Risk Sizing Preview, Cost Audit & CSV Log ==="
+input double          InpRiskPercent              = 0.25;          // Account Equity Risk % Per Signal (Preview)
+input double          InpMaxLots                  = 10.00;         // Hard Cap Lots Per Signal (Preview)
+input double          InpMaxNotionalEquity        = 2.00;          // Max Position Notional / Equity Multiple (0 = Off)
+input double          InpMaxFreeMarginUsePct      = 30.00;         // Max Free Margin Utilization % (Preview)
+input double          InpCommissionPerLot         = 0.00;          // Round-Turn Commission Per Lot (Account Currency)
+input double          InpRiskSlippageATR          = 0.02;          // Slippage Allowance at Stop (ATR Mult)
+input double          InpMaxCostRiskFrac          = 0.10;          // Max Total Cost / Stop-Risk Ratio (0 = Off)
+input double          InpDailyEquityLossPct       = 2.00;          // Daily Equity Drawdown Advisory Limit % (0 = Off)
+input double          InpPeakEquityDDPct          = 10.00;         // Peak Equity Drawdown Advisory Limit % (0 = Off)
+input bool            InpWriteDecisionCSV         = false;         // Log Closed-Bar Decisions to MQL5\\Files CSV
+input string          InpRunTag                   = "lcp_v210";    // Decision CSV Filename Tag
+
 //--- Indicator Plot & Calculation Buffers
 double BuySignalBuffer[];
 double SellSignalBuffer[];
 double VWAPBuffer[];
 double VWAPUpperBuffer[];
 double VWAPLowerBuffer[];
+double EntryEMABuffer[];
+double ExitSignalBuffer[];
+double TrailStopBuffer[];
 double ScoreBuffer[];
 double SLBuffer[];
 double TP1Buffer[];
 double TP2Buffer[];
 double RegimeBuffer[];
 double MLProbBuffer[];
+double SSRNRegimeBuffer[];
+double SSRNSepATRBuffer[];
 
 //--- Private Bar-Aligned State Arrays (Non-Series: 0 = Oldest, rates_total - 1 = Live)
 double g_effVol[];
@@ -172,7 +299,12 @@ double g_sqzMom[];
 double g_kerRaw[];
 int    g_htfBias[];
 long   g_sessStart[];
+int    g_sessBarCount[];
 int    g_fvgDispState[]; // 1 = Bull FVG/Disp, -1 = Bear FVG/Disp, 0 = None
+double g_entryEMA[];
+double g_baseSMA[];
+int    g_daySigCount[];
+int    g_exitReason[];   // Exit reason code plotted at bar k (0 = None)
 
 double g_swHigh[];
 int    g_swHighBar[];
@@ -191,6 +323,29 @@ int    g_lastSigDir[];
 int    g_buyReset[];
 int    g_sellReset[];
 int    g_sigPlaybook[];
+
+//--- SSRN Blackout Windows & Live Sizing Audit Structs
+struct SSRNBlackoutWindow
+{
+   datetime from_time;
+   datetime to_time;
+};
+
+struct SSRNSizingAudit
+{
+   bool   valid;
+   string status;
+   double lots;
+   double risk_budget;
+   double spread_atr;
+   double cost_risk_frac;
+   double min_equity;
+   double margin_used;
+   double stop_atr;
+};
+
+SSRNBlackoutWindow g_blackouts[];
+SSRNSizingAudit    g_liveSizing;
 
 //--- Effective Runtime Parameters (Overridden by Cloud Adaptive Config when enabled & matched)
 int    g_effMinScore       = 68;
@@ -220,14 +375,25 @@ string          g_prefix               = "";
 int             g_prevRatesTotal       = 0;
 int             g_calcStart            = 0;
 datetime        g_lastAlertBarTime     = 0;
+datetime        g_lastDecisionCSVTime  = 0;
 datetime        g_lastMacroCheck       = 0;
 datetime        g_lastCloudCheck       = 0;
 int             g_cachedMacroBias      = 0;
 string          g_cachedMacroNote      = "OFF";
 bool            g_htfPendingSync       = false;
+bool            g_ssrnHtfPendingSync   = false;
 ENUM_TIMEFRAMES g_resolvedHTF          = PERIOD_CURRENT;
+ENUM_TIMEFRAMES g_resolvedSSRNTF       = PERIOD_CURRENT;
 int             g_lastVisualRatesTotal = 0;
 int             g_lastVisualMacroBias  = 999999;
+int             g_csvHandle            = INVALID_HANDLE;
+
+//--- Advisory Equity Drawdown Guard Globals
+datetime        g_eqDayStart           = 0;
+double          g_eqDayRef             = 0.0;
+double          g_eqPeakRef            = 0.0;
+bool            g_eqDayLocked          = false;
+bool            g_eqPeakLocked         = false;
 
 //--- Playbook IDs
 #define PB_NONE         0
@@ -235,6 +401,226 @@ int             g_lastVisualMacroBias  = 999999;
 #define PB_SQUEEZE      2
 #define PB_VWAP_PULL    3
 #define PB_MULTI        4
+#define PB_CH_BREAK     5
+#define PB_EMA_PULL     6
+#define PB_MA_BASE      7
+
+//--- Simulated Exit Reason IDs
+#define EXIT_NONE       0
+#define EXIT_SL         1
+#define EXIT_BE         2
+#define EXIT_TRAIL_SL   3
+#define EXIT_TP1_PART   4
+#define EXIT_TP2        5
+#define EXIT_HTF_FLIP   6
+#define EXIT_HTF_NEUT   7
+#define EXIT_EMA_CLOSE  8
+#define EXIT_MAX_HOLD   9
+#define EXIT_BASE_FLIP  10
+
+//--- Last Exit Tracking for Once-Per-Bar Exit Alert & HUD
+int             g_lastSimExitDir       = 0;
+int             g_lastSimExitReason    = EXIT_NONE;
+double          g_lastSimExitPrice     = 0.0;
+datetime        g_lastSimExitTime      = 0;
+
+//+------------------------------------------------------------------+
+//| SSRN Pure Core Helpers (Closed-Bar Non-Repainting Math)          |
+//+------------------------------------------------------------------+
+int CoreDirection(const double fast, const double slow, const double fast_old,
+                  const double close_price, const double atr, const double min_sep)
+{
+   if(atr <= 0.0 || MathAbs(fast - slow) / atr < min_sep) return 0;
+   if(fast > slow && fast > fast_old && close_price > slow) return 1;
+   if(fast < slow && fast < fast_old && close_price < slow) return -1;
+   return 0;
+}
+
+int CoreBaseline(const double close_price, const double average, const double buffer)
+{
+   if(close_price > average + buffer) return 1;
+   if(close_price < average - buffer) return -1;
+   return 0;
+}
+
+bool CoreBreakout(const int direction, const double close_price,
+                  const double channel_high, const double channel_low,
+                  const double buffer)
+{
+   if(direction == 1)  return (close_price > channel_high + buffer);
+   if(direction == -1) return (close_price < channel_low - buffer);
+   return false;
+}
+
+bool CorePullback(const int direction, const double open_price, const double close_price,
+                  const double ema, const bool touched)
+{
+   if(!touched) return false;
+   if(direction == 1)  return (close_price > ema && close_price > open_price);
+   if(direction == -1) return (close_price < ema && close_price < open_price);
+   return false;
+}
+
+double CoreTrailCandidate(const int direction, const double old_stop, const double best,
+                          const double atr, const double multiplier)
+{
+   if(direction == 1)
+      return MathMax(old_stop, best - atr * multiplier);
+   if(direction == -1)
+      return (old_stop <= 0.0) ? (best + atr * multiplier) : MathMin(old_stop, best + atr * multiplier);
+   return old_stop;
+}
+
+double CoreFloorLots(const double raw, const double minimum, const double step, const double maximum)
+{
+   if(raw <= 0.0 || minimum <= 0.0 || step <= 0.0 || maximum < minimum) return 0.0;
+   double capped = MathMin(raw, maximum);
+   double lots   = MathFloor((capped + step * 1.0e-9) / step) * step;
+   if(lots + step * 1.0e-8 < minimum) return 0.0;
+   return NormalizeDouble(lots, 8);
+}
+
+double CoreRiskLots(const double budget, const double loss_per_lot,
+                    const double commission, const double slippage_loss,
+                    const double minimum, const double step, const double maximum)
+{
+   double denominator = loss_per_lot + commission + slippage_loss;
+   if(budget <= 0.0 || loss_per_lot <= 0.0 || commission < 0.0 || slippage_loss < 0.0 || denominator <= 0.0)
+      return 0.0;
+   return CoreFloorLots(budget / denominator, minimum, step, maximum);
+}
+
+bool CoreEquityLocked(const bool locked, const double equity, const double reference, const double limit_percent)
+{
+   if(locked) return true;
+   return (limit_percent > 0.0 && reference > 0.0 && equity <= reference * (1.0 - limit_percent / 100.0));
+}
+
+bool CoreSessionAllowed(const int hour, const int start_hour, const int end_hour)
+{
+   if(start_hour < end_hour) return (hour >= start_hour && hour < end_hour);
+   return (hour >= start_hour || hour < end_hour);
+}
+
+datetime DayStartTime(const datetime value)
+{
+   MqlDateTime t;
+   TimeToStruct(value, t);
+   t.hour = 0; t.min = 0; t.sec = 0;
+   return StructToTime(t);
+}
+
+double TickRound(const double price, const bool upward)
+{
+   double step = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(step <= 0.0) step = _Point;
+   if(step <= 0.0) return price;
+   double units = price / step;
+   return NormalizeDouble((upward ? MathCeil(units - 1.0e-9) : MathFloor(units + 1.0e-9)) * step, _Digits);
+}
+
+//--- Update Advisory Equity State for HUD Guard
+void UpdateEquityAdvisory()
+{
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(equity <= 0.0) return;
+
+   datetime nowT = TimeCurrent();
+   datetime day  = (nowT > 0) ? DayStartTime(nowT) : 0;
+   if(g_eqDayRef <= 0.0 || (day > 0 && day != g_eqDayStart))
+   {
+      g_eqDayStart  = day;
+      g_eqDayRef    = equity;
+      g_eqDayLocked = false;
+   }
+   if(g_eqPeakRef <= 0.0 || equity > g_eqPeakRef)
+      g_eqPeakRef = equity;
+
+   g_eqDayLocked  = CoreEquityLocked(g_eqDayLocked, equity, g_eqDayRef, InpDailyEquityLossPct);
+   g_eqPeakLocked = CoreEquityLocked(g_eqPeakLocked, equity, g_eqPeakRef, InpPeakEquityDDPct);
+}
+
+//--- Load Optional Blackout Windows CSV (Non-Fatal if Absent)
+void LoadSSRNBlackouts()
+{
+   ArrayResize(g_blackouts, 0);
+   if(!InpUseBlackouts || StringLen(InpBlackoutFile) == 0)
+      return;
+
+   int commonFlag = InpUseCommonFiles ? FILE_COMMON : 0;
+   if(!FileIsExist(InpBlackoutFile, commonFlag))
+   {
+      PrintFormat("LeadingConfluencePro: Blackout CSV '%s' not found; proceeding without scheduled blackouts.", InpBlackoutFile);
+      return;
+   }
+
+   int file = FileOpen(InpBlackoutFile, FILE_READ | FILE_TXT | FILE_ANSI | commonFlag);
+   if(file == INVALID_HANDLE)
+   {
+      PrintFormat("LeadingConfluencePro: Cannot open Blackout CSV '%s' (err=%d).", InpBlackoutFile, GetLastError());
+      return;
+   }
+
+   int lineIdx = 0;
+   while(!FileIsEnding(file))
+   {
+      string line = FileReadString(file);
+      StringReplace(line, "\r", "");
+      StringTrimLeft(line);
+      StringTrimRight(line);
+      if(StringLen(line) == 0 || StringGetCharacter(line, 0) == '#')
+         continue;
+
+      string cols[];
+      int cnt = StringSplit(line, ',', cols);
+      if(cnt < 2)
+         continue;
+
+      StringTrimLeft(cols[0]);  StringTrimRight(cols[0]);
+      StringTrimLeft(cols[1]);  StringTrimRight(cols[1]);
+      StringToLower(cols[0]);
+      if(lineIdx == 0 && (cols[0] == "start_server" || cols[0] == "from" || cols[0] == "start"))
+      {
+         lineIdx++;
+         continue;
+      }
+
+      datetime a = StringToTime(cols[0]);
+      datetime b = StringToTime(cols[1]);
+      if(a > 0 && b > a)
+      {
+         int n = ArraySize(g_blackouts);
+         ArrayResize(g_blackouts, n + 1);
+         g_blackouts[n].from_time = a;
+         g_blackouts[n].to_time   = b;
+      }
+      lineIdx++;
+   }
+   FileClose(file);
+   PrintFormat("LeadingConfluencePro: Loaded %d SSRN blackout windows from %s.", ArraySize(g_blackouts), InpBlackoutFile);
+}
+
+//--- Evaluate Weekend / Session / Blackout Entry Filters at Specific Timestamp
+bool CausalEntryTimeAllowed(const datetime barTime)
+{
+   MqlDateTime t;
+   TimeToStruct(barTime, t);
+   if(!InpAllowWeekend && (t.day_of_week == 0 || t.day_of_week == 6))
+      return false;
+
+   if(InpUseSessionFilter && InpSessionStartHour != InpSessionEndHour)
+   {
+      if(!CoreSessionAllowed(t.hour, InpSessionStartHour, InpSessionEndHour))
+         return false;
+   }
+
+   for(int i = 0; i < ArraySize(g_blackouts); i++)
+   {
+      if(barTime >= g_blackouts[i].from_time && barTime <= g_blackouts[i].to_time)
+         return false;
+   }
+   return true;
+}
 
 //+------------------------------------------------------------------+
 //| Helper: Standard Normal CDF (Abramowitz & Stegun 7.1.26)         |
@@ -286,6 +672,13 @@ ENUM_TIMEFRAMES ResolveHTF(const ENUM_TIMEFRAMES requested, const ENUM_TIMEFRAME
    }
 }
 
+ENUM_TIMEFRAMES ResolveSSRNTrendTF(const ENUM_TIMEFRAMES requested, const ENUM_TIMEFRAMES baseTF)
+{
+   if(requested != PERIOD_CURRENT && PeriodSeconds(requested) >= PeriodSeconds(baseTF))
+      return requested;
+   return ResolveHTF(PERIOD_CURRENT, baseTF);
+}
+
 //+------------------------------------------------------------------+
 //| Helper: Exact Causal Bar Close Timestamp                         |
 //+------------------------------------------------------------------+
@@ -316,7 +709,10 @@ long GetBarCloseTime(const datetime barOpenTime, const ENUM_TIMEFRAMES tf)
 long GetSessionKey(const datetime t)
 {
    if(_Period < PERIOD_D1)
-      return (long)t / 86400;
+   {
+      int anchorH = MathMax(0, MathMin(23, InpVWAPAnchorHour));
+      return ((long)t - (long)anchorH * 3600) / 86400;
+   }
 
    if(_Period == PERIOD_D1)
       return ((long)t + 3 * 86400) / (7 * 86400);
@@ -378,7 +774,12 @@ void ResizeStateArrays(const int sz)
    ArrayResize(g_kerRaw,       sz, reserve);
    ArrayResize(g_htfBias,      sz, reserve);
    ArrayResize(g_sessStart,    sz, reserve);
+   ArrayResize(g_sessBarCount, sz, reserve);
    ArrayResize(g_fvgDispState, sz, reserve);
+   ArrayResize(g_entryEMA,     sz, reserve);
+   ArrayResize(g_baseSMA,      sz, reserve);
+   ArrayResize(g_daySigCount,  sz, reserve);
+   ArrayResize(g_exitReason,   sz, reserve);
 
    ArrayResize(g_swHigh,       sz, reserve);
    ArrayResize(g_swHighBar,    sz, reserve);
@@ -940,7 +1341,135 @@ void ComputeCausalHTFBias(const int rates_total,
 }
 
 //+------------------------------------------------------------------+
-//| Helper: Playbook Name Text                                       |
+//| Helper: Compute Causal SSRN HTF Regime (EMA50/200 + Slope + ATR) |
+//+------------------------------------------------------------------+
+void ComputeCausalSSRNRegime(const int rates_total,
+                             const int startIdx,
+                             const datetime &time[])
+{
+   if(InpMergeMode == MERGE_SSRN_MA_BASELINE)
+   {
+      g_ssrnHtfPendingSync = false;
+      for(int i = startIdx; i < rates_total; i++)
+      {
+         SSRNRegimeBuffer[i] = 0.0;
+         SSRNSepATRBuffer[i] = 0.0;
+      }
+      return;
+   }
+
+   int slowP      = MathMax(3, InpSSRNTrendSlow);
+   int fastP      = MathMax(2, MathMin(InpSSRNTrendFast, slowP - 1));
+   int slopeBars  = MathMax(1, InpSSRNSlopeBars);
+   int atrP       = MathMax(2, InpATRPeriod);
+   int minHistory = MathMax(slowP + 20, fastP + slopeBars + atrP + 20);
+
+   int chartSec = MathMax(1, PeriodSeconds(_Period));
+   int htfSec   = MathMax(chartSec, PeriodSeconds(g_resolvedSSRNTF));
+   int ratio    = MathMax(1, htfSec / chartSec);
+   int spanBars = rates_total - g_calcStart;
+   int needed   = (spanBars / ratio) + minHistory;
+   if(needed < minHistory + 40) needed = minHistory + 40;
+
+   int avail = Bars(_Symbol, g_resolvedSSRNTF);
+   if(avail <= 0)
+   {
+      g_ssrnHtfPendingSync = true;
+      for(int i = startIdx; i < rates_total; i++)
+      {
+         SSRNRegimeBuffer[i] = 0.0;
+         SSRNSepATRBuffer[i] = 0.0;
+      }
+      return;
+   }
+   if(needed > avail) needed = avail;
+
+   MqlRates htfRates[];
+   ArraySetAsSeries(htfRates, false);
+   int htfCount = CopyRates(_Symbol, g_resolvedSSRNTF, 0, needed, htfRates);
+   if(htfCount <= slopeBars + 2)
+   {
+      g_ssrnHtfPendingSync = true;
+      for(int i = startIdx; i < rates_total; i++)
+      {
+         SSRNRegimeBuffer[i] = 0.0;
+         SSRNSepATRBuffer[i] = 0.0;
+      }
+      return;
+   }
+
+   g_ssrnHtfPendingSync = false;
+
+   double aFast = 2.0 / ((double)fastP + 1.0);
+   double aSlow = 2.0 / ((double)slowP + 1.0);
+
+   double htfFastArr[];
+   int    htfRegArr[];
+   double htfSepArr[];
+   long   htfCloseTime[];
+   ArrayResize(htfFastArr,   htfCount);
+   ArrayResize(htfRegArr,    htfCount);
+   ArrayResize(htfSepArr,    htfCount);
+   ArrayResize(htfCloseTime, htfCount);
+
+   double emaF = htfRates[0].close;
+   double emaS = htfRates[0].close;
+   double atrH = htfRates[0].high - htfRates[0].low;
+
+   for(int h = 0; h < htfCount; h++)
+   {
+      if(h > 0)
+      {
+         emaF = aFast * htfRates[h].close + (1.0 - aFast) * emaF;
+         emaS = aSlow * htfRates[h].close + (1.0 - aSlow) * emaS;
+
+         double tr  = htfRates[h].high - htfRates[h].low;
+         double tr2 = MathAbs(htfRates[h].high - htfRates[h - 1].close);
+         double tr3 = MathAbs(htfRates[h].low  - htfRates[h - 1].close);
+         if(tr2 > tr) tr = tr2;
+         if(tr3 > tr) tr = tr3;
+         if(h < atrP)
+            atrH = (atrH * (double)h + tr) / (double)(h + 1);
+         else
+            atrH = (atrH * (double)(atrP - 1) + tr) / (double)atrP;
+      }
+      htfFastArr[h]   = emaF;
+      htfCloseTime[h] = GetBarCloseTime(htfRates[h].time, g_resolvedSSRNTF);
+
+      int    dir = 0;
+      double sep = 0.0;
+      if(h >= slopeBars && atrH > 1e-12)
+      {
+         sep = MathAbs(emaF - emaS) / atrH;
+         if(h >= MathMin(htfCount - 1, MathMax(atrP, MathMin(slowP / 4, 20))))
+            dir = CoreDirection(emaF, emaS, htfFastArr[h - slopeBars], htfRates[h].close, atrH, InpSSRNMinSepATR);
+      }
+      htfRegArr[h] = dir;
+      htfSepArr[h] = sep;
+   }
+
+   int hPtr = 0;
+   for(int i = startIdx; i < rates_total; i++)
+   {
+      long barClose = GetBarCloseTime(time[i], _Period);
+      while(hPtr + 1 < htfCount && htfCloseTime[hPtr + 1] <= barClose)
+         hPtr++;
+
+      if(htfCloseTime[hPtr] <= barClose)
+      {
+         SSRNRegimeBuffer[i] = (double)htfRegArr[hPtr];
+         SSRNSepATRBuffer[i] = htfSepArr[hPtr];
+      }
+      else
+      {
+         SSRNRegimeBuffer[i] = 0.0;
+         SSRNSepATRBuffer[i] = 0.0;
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Helper: Playbook & Exit Reason Name Text                         |
 //+------------------------------------------------------------------+
 string PlaybookName(const int pb)
 {
@@ -950,8 +1479,184 @@ string PlaybookName(const int pb)
       case PB_SQUEEZE:   return "SqzBreak";
       case PB_VWAP_PULL: return "VWAPPull";
       case PB_MULTI:     return "MultiConf";
+      case PB_CH_BREAK:  return "ChBreak";
+      case PB_EMA_PULL:  return "EMAPull";
+      case PB_MA_BASE:   return "MABase";
       default:           return "None";
    }
+}
+
+string ExitReasonName(const int reasonCode)
+{
+   switch(reasonCode)
+   {
+      case EXIT_SL:        return "SL";
+      case EXIT_BE:        return "BE";
+      case EXIT_TRAIL_SL:  return "TrailSL";
+      case EXIT_TP1_PART:  return "TP1_Part";
+      case EXIT_TP2:       return "TP2";
+      case EXIT_HTF_FLIP:  return "HTF_Flip";
+      case EXIT_HTF_NEUT:  return "HTF_Neut";
+      case EXIT_EMA_CLOSE: return "EMA_Exit";
+      case EXIT_MAX_HOLD:  return "MaxHold";
+      case EXIT_BASE_FLIP: return "Base_Exit";
+      default:             return "None";
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Helper: Live SSRN Cost & Risk Sizing Audit Preview               |
+//+------------------------------------------------------------------+
+void ComputeLiveSizingPreview(const double refPrice,
+                              const double refStop,
+                              const int dir,
+                              const double curATR,
+                              SSRNSizingAudit &out)
+{
+   out.valid          = false;
+   out.status         = "NA";
+   out.lots           = 0.0;
+   out.risk_budget    = 0.0;
+   out.spread_atr     = 0.0;
+   out.cost_risk_frac = 0.0;
+   out.min_equity     = 0.0;
+   out.margin_used    = 0.0;
+   out.stop_atr       = 0.0;
+
+   MqlTick quote;
+   if(!SymbolInfoTick(_Symbol, quote) || quote.bid <= 0.0 || quote.ask < quote.bid)
+   {
+      out.status = "WAIT_QUOTE";
+      return;
+   }
+   if(curATR <= 1e-12)
+   {
+      out.status = "WAIT_ATR";
+      return;
+   }
+
+   out.spread_atr = (quote.ask - quote.bid) / curATR;
+   int side = (dir >= 0) ? 1 : -1;
+   ENUM_ORDER_TYPE oType = (side > 0) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   double entry = (side > 0) ? quote.ask : quote.bid;
+
+   double slDist = 0.0;
+   if(refStop > 0.0 && refStop != EMPTY_VALUE && refPrice > 0.0 && MathAbs(refPrice - refStop) > _Point)
+      slDist = MathAbs(refPrice - refStop);
+   else
+      slDist = InpSSRNStopATR * curATR;
+
+   if(slDist <= 0.0)
+   {
+      out.status = "INVALID_SL";
+      return;
+   }
+   out.stop_atr = slDist / curATR;
+
+   double stop    = entry - side * slDist;
+   double minimum = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double step    = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   double maximum = MathMin(InpMaxLots, SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX));
+   if(minimum <= 0.0 || step <= 0.0 || maximum < minimum)
+   {
+      out.status = "VOL_LIMIT";
+      return;
+   }
+
+   double slipDist    = InpRiskSlippageATR * curATR;
+   double slippedExit = stop - side * slipDist;
+   double lossRef = 0.0, slipRef = 0.0, notlRef = 0.0, sprRef = 0.0;
+   bool calcOk = (slippedExit > 0.0 &&
+                  OrderCalcProfit(oType, _Symbol, minimum, entry, stop, lossRef) &&
+                  OrderCalcProfit(oType, _Symbol, minimum, stop, slippedExit, slipRef) &&
+                  OrderCalcProfit(oType, _Symbol, minimum, entry, entry + side * entry * 0.01, notlRef) &&
+                  OrderCalcProfit(oType, _Symbol, minimum, entry, (side > 0) ? quote.bid : quote.ask, sprRef));
+
+   double lossPerLot = 0.0, slipPerLot = 0.0, notlPerLot = 0.0, sprPerLot = 0.0;
+   if(calcOk)
+   {
+      lossPerLot = MathAbs(lossRef) / minimum;
+      slipPerLot = MathAbs(slipRef) / minimum;
+      notlPerLot = MathAbs(notlRef) / minimum / 0.01;
+      sprPerLot  = MathAbs(sprRef)  / minimum;
+   }
+   else
+   {
+      double tickVal = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+      double tickSz  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+      double cSize   = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+      if(tickVal <= 0.0 || tickSz <= 0.0)
+      {
+         out.status = "CALC_FAIL";
+         return;
+      }
+      lossPerLot = (slDist / tickSz) * tickVal;
+      slipPerLot = (slipDist / tickSz) * tickVal;
+      notlPerLot = (cSize > 0.0) ? (entry * cSize) : ((entry / tickSz) * tickVal);
+      sprPerLot  = ((quote.ask - quote.bid) / tickSz) * tickVal;
+   }
+
+   if(lossPerLot <= 0.0 || notlPerLot <= 0.0)
+   {
+      out.status = "BAD_VAL";
+      return;
+   }
+
+   double equity     = AccountInfoDouble(ACCOUNT_EQUITY);
+   double budget     = equity * InpRiskPercent / 100.0;
+   double comm       = MathMax(0.0, InpCommissionPerLot);
+   double costPerLot = sprPerLot + comm + slipPerLot;
+   out.risk_budget    = budget;
+   out.cost_risk_frac = (lossPerLot > 0.0) ? (costPerLot / lossPerLot) : 1.0;
+
+   double minRisk = minimum * (lossPerLot + comm + slipPerLot);
+   double eqRisk  = (InpRiskPercent > 0.0) ? (minRisk * 100.0 / InpRiskPercent) : 0.0;
+   double eqNotl  = (InpMaxNotionalEquity > 0.0) ? (minimum * notlPerLot / InpMaxNotionalEquity) : 0.0;
+   out.min_equity = MathMax(eqRisk, eqNotl);
+
+   if(InpMaxCostRiskFrac > 0.0 && out.cost_risk_frac > InpMaxCostRiskFrac)
+   {
+      out.status = "COST_HIGH";
+      return;
+   }
+
+   double lots = CoreRiskLots(budget, lossPerLot, comm, slipPerLot, minimum, step, maximum);
+   if(lots < minimum)
+   {
+      out.status = "MIN_LOT_RISK";
+      return;
+   }
+   if(InpMaxNotionalEquity > 0.0)
+   {
+      lots = CoreFloorLots(MathMin(lots, equity * InpMaxNotionalEquity / notlPerLot), minimum, step, maximum);
+      if(lots < minimum)
+      {
+         out.status = "MIN_LOT_NOTL";
+         return;
+      }
+   }
+
+   double margin = 0.0;
+   if(!OrderCalcMargin(oType, _Symbol, lots, entry, margin))
+   {
+      double mInit = SymbolInfoDouble(_Symbol, SYMBOL_MARGIN_INITIAL);
+      margin = (mInit > 0.0) ? (mInit * lots) : 0.0;
+   }
+   double allowance = AccountInfoDouble(ACCOUNT_MARGIN_FREE) * InpMaxFreeMarginUsePct / 100.0;
+   if(allowance > 0.0 && margin > allowance && margin > 0.0)
+   {
+      lots = CoreFloorLots(lots * allowance / margin, minimum, step, maximum);
+      if(lots < minimum || !OrderCalcMargin(oType, _Symbol, lots, entry, margin) || margin > allowance)
+      {
+         out.status = "MARGIN_LOW";
+         return;
+      }
+   }
+
+   out.lots        = lots;
+   out.margin_used = margin;
+   out.valid       = true;
+   out.status      = "OK";
 }
 
 //+------------------------------------------------------------------+
@@ -1030,8 +1735,18 @@ void SetLevelLine(const string objBase,
 //+------------------------------------------------------------------+
 void ClearTradeLines()
 {
-   string keys[4] = {"ENT", "SL", "TP1", "TP2"};
-   for(int k = 0; k < 4; k++)
+   string keys[5] = {"ENT", "SL", "TP1", "TP2", "TRAIL"};
+   for(int k = 0; k < 5; k++)
+   {
+      ObjectDelete(0, g_prefix + keys[k] + "_Line");
+      ObjectDelete(0, g_prefix + keys[k] + "_Txt");
+   }
+}
+
+void DeleteTargetLines()
+{
+   string keys[2] = {"TP1", "TP2"};
+   for(int k = 0; k < 2; k++)
    {
       ObjectDelete(0, g_prefix + keys[k] + "_Line");
       ObjectDelete(0, g_prefix + keys[k] + "_Txt");
@@ -1039,7 +1754,50 @@ void ClearTradeLines()
 }
 
 //+------------------------------------------------------------------+
-//| Helper: Fire Once-Per-Closed-Bar Signal Alerts                   |
+//| Helper: Append Closed-Bar Diagnostics to Optional CSV File       |
+//+------------------------------------------------------------------+
+void WriteDecisionCSVRow(const int barIdx,
+                         const datetime &time[],
+                         const double &close[],
+                         const int &spread[])
+{
+   if(g_csvHandle == INVALID_HANDLE)
+      return;
+
+   int    sigDir = (BuySignalBuffer[barIdx] != EMPTY_VALUE) ? 1 : ((SellSignalBuffer[barIdx] != EMPTY_VALUE) ? -1 : 0);
+   string pbStr  = PlaybookName(g_sigPlaybook[barIdx]);
+   int    scVal  = (int)MathAbs(ScoreBuffer[barIdx]);
+   double sprATR = (g_atr[barIdx] > 1e-12 && spread[barIdx] > 0) ? ((double)spread[barIdx] * _Point / g_atr[barIdx]) : g_liveSizing.spread_atr;
+   string exStr  = ExitReasonName(g_exitReason[barIdx]);
+
+   FileWrite(g_csvHandle,
+             TimeToString(time[barIdx], TIME_DATE | TIME_MINUTES),
+             _Symbol,
+             EnumToString(_Period),
+             EnumToString(InpMergeMode),
+             (int)MathRound(SSRNRegimeBuffer[barIdx]),
+             DoubleToString(SSRNSepATRBuffer[barIdx], 3),
+             g_htfBias[barIdx],
+             DoubleToString(RegimeBuffer[barIdx], 3),
+             DoubleToString(g_ofi[barIdx], 3),
+             DoubleToString(g_rvol[barIdx], 3),
+             DoubleToString(g_vwapZ[barIdx], 3),
+             DoubleToString(g_atrPct[barIdx], 1),
+             g_cachedMacroBias,
+             sigDir,
+             pbStr,
+             scVal,
+             DoubleToString(MLProbBuffer[barIdx], 4),
+             (SLBuffer[barIdx] != EMPTY_VALUE) ? DoubleToString(SLBuffer[barIdx], _Digits) : "",
+             (TP1Buffer[barIdx] != EMPTY_VALUE) ? DoubleToString(TP1Buffer[barIdx], _Digits) : "",
+             (TP2Buffer[barIdx] != EMPTY_VALUE) ? DoubleToString(TP2Buffer[barIdx], _Digits) : "",
+             DoubleToString(sprATR, 4),
+             exStr);
+   FileFlush(g_csvHandle);
+}
+
+//+------------------------------------------------------------------+
+//| Helper: Fire Once-Per-Closed-Bar Signal & Exit Alerts            |
 //+------------------------------------------------------------------+
 void FireSignalAlerts(const int barIdx,
                       const datetime &time[],
@@ -1047,145 +1805,303 @@ void FireSignalAlerts(const int barIdx,
 {
    bool isBuy  = (BuySignalBuffer[barIdx] != EMPTY_VALUE);
    bool isSell = (SellSignalBuffer[barIdx] != EMPTY_VALUE);
-   if(!isBuy && !isSell)
-      return;
+   if(isBuy || isSell)
+   {
+      string dirStr   = isBuy ? "BUY" : "SELL";
+      int    scoreVal = (int)MathAbs(ScoreBuffer[barIdx]);
+      string pbStr    = PlaybookName(g_sigPlaybook[barIdx]);
+      string mlStr    = (MLProbBuffer[barIdx] > 0.0) ? StringFormat(" | ML: %.0f%%", MLProbBuffer[barIdx] * 100.0) : "";
+      string lotStr   = g_liveSizing.valid ? StringFormat(" | Lots: %.2f", g_liveSizing.lots) : "";
 
-   string dirStr   = isBuy ? "BUY" : "SELL";
-   int    scoreVal = (int)MathAbs(ScoreBuffer[barIdx]);
-   string pbStr    = PlaybookName(g_sigPlaybook[barIdx]);
-   string mlStr    = (MLProbBuffer[barIdx] > 0.0) ? StringFormat(" | ML: %.0f%%", MLProbBuffer[barIdx] * 100.0) : "";
+      string msg = StringFormat("LeadingConfluencePro v2.10 [%s %s] CONFIRMED %s (%s) | Score: %d/100%s%s | Entry: %s | SL: %s | TP1: %s | TP2: %s | Bar: %s",
+                                _Symbol,
+                                EnumToString(_Period),
+                                dirStr,
+                                pbStr,
+                                scoreVal,
+                                mlStr,
+                                lotStr,
+                                DoubleToString(close[barIdx], _Digits),
+                                DoubleToString(SLBuffer[barIdx], _Digits),
+                                DoubleToString(TP1Buffer[barIdx], _Digits),
+                                DoubleToString(TP2Buffer[barIdx], _Digits),
+                                TimeToString(time[barIdx], TIME_DATE | TIME_MINUTES));
 
-   string msg = StringFormat("LeadingConfluencePro v2 [%s %s] CONFIRMED %s (%s) | Score: %d/100%s | Entry: %s | SL: %s | TP1: %s | TP2: %s | Bar: %s",
-                             _Symbol,
-                             EnumToString(_Period),
-                             dirStr,
-                             pbStr,
-                             scoreVal,
-                             mlStr,
-                             DoubleToString(close[barIdx], _Digits),
-                             DoubleToString(SLBuffer[barIdx], _Digits),
-                             DoubleToString(TP1Buffer[barIdx], _Digits),
-                             DoubleToString(TP2Buffer[barIdx], _Digits),
-                             TimeToString(time[barIdx], TIME_DATE | TIME_MINUTES));
+      if(InpEnableAlert) Alert(msg);
+      if(InpEnablePush)  SendNotification(msg);
+      if(InpEnableEmail) SendMail(StringFormat("LCPv2.10 %s %s %s (%d)", _Symbol, EnumToString(_Period), dirStr, scoreVal), msg);
+      if(InpEnableSound && StringLen(InpSoundFile) > 0) PlaySound(InpSoundFile);
+   }
 
-   if(InpEnableAlert)
-      Alert(msg);
-   if(InpEnablePush)
-      SendNotification(msg);
-   if(InpEnableEmail)
-      SendMail(StringFormat("LCPv2 %s %s %s (%d)", _Symbol, EnumToString(_Period), dirStr, scoreVal), msg);
-   if(InpEnableSound && StringLen(InpSoundFile) > 0)
-      PlaySound(InpSoundFile);
+   if(InpAlertOnExit && g_exitReason[barIdx] != EXIT_NONE)
+   {
+      string emsg = StringFormat("LeadingConfluencePro v2.10 [%s %s] SIMULATED EXIT (%s) @ %s | Bar: %s",
+                                 _Symbol,
+                                 EnumToString(_Period),
+                                 ExitReasonName(g_exitReason[barIdx]),
+                                 DoubleToString(close[barIdx], _Digits),
+                                 TimeToString(time[barIdx], TIME_DATE | TIME_MINUTES));
+      if(InpEnableAlert) Alert(emsg);
+      if(InpEnablePush)  SendNotification(emsg);
+      if(InpEnableEmail) SendMail(StringFormat("LCPv2.10 EXIT %s %s (%s)", _Symbol, EnumToString(_Period), ExitReasonName(g_exitReason[barIdx])), emsg);
+   }
 }
 
 //+------------------------------------------------------------------+
-//| Helper: Evaluate Historical Stats & Render Dashboard/Trade Lines |
+//| Helper: Causal Trade Sim, Trail/Exit Buffers & HUD Rendering     |
 //+------------------------------------------------------------------+
-void UpdateVisualsAndStats(const int rates_total,
-                           const datetime &time[],
-                           const double &high[],
-                           const double &low[],
-                           const double &close[],
-                           const long &realVol[])
+void SimulateTradesAndVisuals(const int rates_total,
+                              const datetime &time[],
+                              const double &high[],
+                              const double &low[],
+                              const double &close[],
+                              const long &realVol[],
+                              const int &spread[])
 {
    int lastClosed = rates_total - 2;
    if(lastClosed < g_calcStart)
       return;
 
-   int totalSignals = 0;
-   int closedTrades = 0;
-   int tp1Wins      = 0;
-   int tp2Wins      = 0;
-   int losses       = 0;
-   int openTrades   = 0;
-   int lastSigIdx   = -1;
-
-   // Causal forward-bar evaluation using strictly closed bars (conservative SL-first tie-breaking)
-   for(int s = g_calcStart; s <= lastClosed; s++)
+   for(int k = g_calcStart; k <= lastClosed; k++)
    {
-      int dir = 0;
-      if(BuySignalBuffer[s] != EMPTY_VALUE)       dir = 1;
-      else if(SellSignalBuffer[s] != EMPTY_VALUE) dir = -1;
-      else continue;
+      ExitSignalBuffer[k] = EMPTY_VALUE;
+      TrailStopBuffer[k]  = EMPTY_VALUE;
+      g_exitReason[k]     = EXIT_NONE;
+   }
+   int liveIdx = rates_total - 1;
+   ExitSignalBuffer[liveIdx] = EMPTY_VALUE;
+   TrailStopBuffer[liveIdx]  = EMPTY_VALUE;
+   g_exitReason[liveIdx]     = EXIT_NONE;
 
-      totalSignals++;
-      lastSigIdx = s;
+   g_lastSimExitDir    = 0;
+   g_lastSimExitReason = EXIT_NONE;
+   g_lastSimExitPrice  = 0.0;
+   g_lastSimExitTime   = 0;
 
-      double entry = close[s];
-      double sl    = SLBuffer[s];
-      double tp1   = TP1Buffer[s];
-      double tp2   = TP2Buffer[s];
-      if(sl == EMPTY_VALUE || tp1 == EMPTY_VALUE || tp2 == EMPTY_VALUE)
-         continue;
+   int    totalSignals = 0;
+   int    closedTrades = 0;
+   int    totalWins    = 0;
+   int    tp1Wins      = 0;
+   int    tp2Wins      = 0;
+   int    trailBeWins  = 0;
+   int    losses       = 0;
+   double totalR       = 0.0;
+   int    lastSigIdx   = -1;
 
-      bool resolved = false;
-      bool hitTP1   = false;
+   bool   inTrade      = false;
+   int    entryBar     = -1;
+   int    side         = 0;
+   double entry        = 0.0;
+   double activeSL     = 0.0;
+   double tp1          = 0.0;
+   double tp2          = 0.0;
+   double initRisk     = 0.0;
+   double bestPrice    = 0.0;
+   bool   hitTP1       = false;
+   bool   slIsBE       = false;
+   bool   slIsTrail    = false;
 
-      for(int k = s + 1; k <= lastClosed; k++)
+   for(int k = g_calcStart; k <= lastClosed; k++)
+   {
+      int sigDirHere = 0;
+      if(BuySignalBuffer[k] != EMPTY_VALUE)       sigDirHere = 1;
+      else if(SellSignalBuffer[k] != EMPTY_VALUE) sigDirHere = -1;
+      if(sigDirHere != 0)
       {
-         if(dir == 1)
-         {
-            bool slHit  = (low[k] <= sl);
-            bool tp1Hit = (high[k] >= tp1);
-            bool tp2Hit = (high[k] >= tp2);
+         totalSignals++;
+         lastSigIdx = k;
+      }
 
-            if(slHit)
-            {
-               if(!hitTP1) losses++;
-               resolved = true;
-               break;
-            }
+      // 1) Advance any open simulated trade before considering new signal at k
+      if(inTrade && k > entryBar)
+      {
+         if(InpShowSSRNTrailLine && activeSL > 0.0)
+            TrailStopBuffer[k] = activeSL;
+
+         int    exitCode = EXIT_NONE;
+         double exitPx   = close[k];
+         double barR     = 0.0;
+
+         bool slHit = (side == 1) ? (low[k] <= activeSL) : (high[k] >= activeSL);
+         if(slHit)
+         {
+            exitCode = slIsTrail ? EXIT_TRAIL_SL : (slIsBE ? EXIT_BE : EXIT_SL);
+            exitPx   = activeSL;
+            double remR = (initRisk > 0.0) ? (side * (exitPx - entry) / initRisk) : -1.0;
+            barR = hitTP1 ? (0.5 * g_effTP1Mult + 0.5 * remR) : remR;
+         }
+         else if(InpSSRNUseFixedTargets)
+         {
+            bool tp1Hit = (side == 1) ? (high[k] >= tp1) : (low[k] <= tp1);
+            bool tp2Hit = (side == 1) ? (high[k] >= tp2) : (low[k] <= tp2);
             if(tp2Hit)
             {
                if(!hitTP1) tp1Wins++;
                tp2Wins++;
                hitTP1   = true;
-               resolved = true;
-               break;
+               exitCode = EXIT_TP2;
+               exitPx   = tp2;
+               barR     = 0.5 * g_effTP1Mult + 0.5 * g_effTP2Mult;
             }
-            if(tp1Hit && !hitTP1)
+            else if(tp1Hit && !hitTP1)
             {
                tp1Wins++;
                hitTP1 = true;
-               sl = entry;
+               if((side == 1 && entry > activeSL) || (side == -1 && entry < activeSL))
+               {
+                  activeSL = TickRound(entry, side == -1);
+                  if(!slIsTrail) slIsBE = true;
+               }
             }
+         }
+
+         if(exitCode == EXIT_NONE)
+         {
+            int held     = k - entryBar;
+            int ssrnDirK = (int)MathRound(SSRNRegimeBuffer[k]);
+
+            if(InpMergeMode == MERGE_SSRN_MA_BASELINE)
+            {
+               if(g_baseSMA[k] > 0.0)
+               {
+                  int want = CoreBaseline(close[k], g_baseSMA[k], InpSSRNBaselineBufATR * g_atr[k]);
+                  if((InpSidePolicy == SIDE_LONG_ONLY && want < 0) || (InpSidePolicy == SIDE_SHORT_ONLY && want > 0))
+                     want = 0;
+                  if(want != side)
+                  {
+                     exitCode = EXIT_BASE_FLIP;
+                     exitPx   = close[k];
+                  }
+               }
+            }
+            else
+            {
+               if(InpSSRNExitOnTrendFlip && ssrnDirK == -side)
+               {
+                  exitCode = EXIT_HTF_FLIP;
+                  exitPx   = close[k];
+               }
+               else if(InpSSRNExitOnNeutral && ssrnDirK == 0)
+               {
+                  exitCode = EXIT_HTF_NEUT;
+                  exitPx   = close[k];
+               }
+            }
+
+            if(exitCode == EXIT_NONE && InpSSRNMaxHoldBars > 0 && held >= InpSSRNMaxHoldBars)
+            {
+               exitCode = EXIT_MAX_HOLD;
+               exitPx   = close[k];
+            }
+            if(exitCode == EXIT_NONE && InpSSRNTrailMode == SSRN_EXIT_EMA_CLOSE && g_entryEMA[k] > 0.0 && side * (close[k] - g_entryEMA[k]) < 0.0)
+            {
+               exitCode = EXIT_EMA_CLOSE;
+               exitPx   = close[k];
+            }
+
+            if(exitCode != EXIT_NONE)
+            {
+               double remR = (initRisk > 0.0) ? (side * (exitPx - entry) / initRisk) : 0.0;
+               barR = hitTP1 ? (0.5 * g_effTP1Mult + 0.5 * remR) : remR;
+            }
+         }
+
+         if(exitCode != EXIT_NONE)
+         {
+            closedTrades++;
+            totalR += barR;
+            if(barR > 0.0) totalWins++;
+            else           losses++;
+
+            if(exitCode == EXIT_TRAIL_SL || exitCode == EXIT_BE)
+               trailBeWins++;
+
+            g_exitReason[k]     = exitCode;
+            g_lastSimExitDir    = side;
+            g_lastSimExitReason = exitCode;
+            g_lastSimExitPrice  = exitPx;
+            g_lastSimExitTime   = time[k];
+
+            if(InpShowSSRNExits && exitCode != EXIT_SL && exitCode != EXIT_TP2)
+            {
+               double off = MathMax(_Point * 5.0, 0.35 * g_atr[k]);
+               ExitSignalBuffer[k] = (side == 1) ? (high[k] + off) : (low[k] - off);
+            }
+
+            inTrade = false;
          }
          else
          {
-            bool slHit  = (high[k] >= sl);
-            bool tp1Hit = (low[k] <= tp1);
-            bool tp2Hit = (low[k] <= tp2);
+            // Exclude entry bar from bestPrice; update next bar's trail / BE stop causally
+            bestPrice = (side == 1) ? MathMax(bestPrice, high[k]) : MathMin(bestPrice, low[k]);
+            double favorable = side * (close[k] - entry);
+            double nextSL    = activeSL;
+            bool   didTrail  = false;
+            bool   didBE     = false;
 
-            if(slHit)
+            if(InpSSRNTrailMode == SSRN_TRAIL_ATR && favorable >= InpSSRNTrailStartR * initRisk && g_atr[k] > 0.0)
             {
-               if(!hitTP1) losses++;
-               resolved = true;
-               break;
+               double candT = CoreTrailCandidate(side, nextSL, bestPrice, g_atr[k], InpSSRNTrailATR);
+               if((side == 1 && candT > nextSL) || (side == -1 && candT < nextSL))
+               {
+                  nextSL   = candT;
+                  didTrail = true;
+               }
             }
-            if(tp2Hit)
+            if(InpSSRNUseBreakeven && favorable >= InpSSRNBreakevenTrigR * initRisk)
             {
-               if(!hitTP1) tp1Wins++;
-               tp2Wins++;
-               hitTP1   = true;
-               resolved = true;
-               break;
+               double beP = entry + side * InpSSRNBreakevenOffR * initRisk;
+               if((side == 1 && beP > nextSL) || (side == -1 && (nextSL <= 0.0 || beP < nextSL)))
+               {
+                  nextSL   = beP;
+                  didBE    = true;
+                  didTrail = false;
+               }
             }
-            if(tp1Hit && !hitTP1)
+
+            nextSL = TickRound(nextSL, side == -1);
+            if((side == 1 && nextSL > activeSL + 0.5 * _Point) || (side == -1 && nextSL < activeSL - 0.5 * _Point))
             {
-               tp1Wins++;
-               hitTP1 = true;
-               sl = entry;
+               activeSL = nextSL;
+               if(didTrail)   slIsTrail = true;
+               else if(didBE) slIsBE    = true;
             }
          }
       }
 
-      if(resolved || hitTP1)
-         closedTrades++;
-      else
-         openTrades++;
+      // 2) Open new simulated trade if flat on closed bar k
+      if(!inTrade && sigDirHere != 0 && SLBuffer[k] != EMPTY_VALUE)
+      {
+         entry     = close[k];
+         activeSL  = SLBuffer[k];
+         initRisk  = MathAbs(entry - activeSL);
+         if(initRisk > _Point * 2.0)
+         {
+            inTrade   = true;
+            entryBar  = k;
+            side      = sigDirHere;
+            tp1       = TP1Buffer[k];
+            tp2       = TP2Buffer[k];
+            bestPrice = entry;
+            hitTP1    = false;
+            slIsBE    = false;
+            slIsTrail = false;
+            if(InpShowSSRNTrailLine)
+               TrailStopBuffer[k] = activeSL;
+         }
+      }
    }
 
-   // Update Entry / SL / TP1 / TP2 Projection Lines for Latest Confirmed Signal
+   int openTrades = inTrade ? 1 : 0;
+
+   // Compute live sizing & equity advisory snapshot
+   int    refDir   = inTrade ? side : ((lastSigIdx >= 0) ? ((BuySignalBuffer[lastSigIdx] != EMPTY_VALUE) ? 1 : -1) : (int)MathRound(SSRNRegimeBuffer[lastClosed]));
+   double refPrice = (lastSigIdx >= 0) ? close[lastSigIdx] : close[lastClosed];
+   double refStop  = inTrade ? activeSL : ((lastSigIdx >= 0) ? SLBuffer[lastSigIdx] : 0.0);
+   ComputeLiveSizingPreview(refPrice, refStop, refDir, g_atr[lastClosed], g_liveSizing);
+   UpdateEquityAdvisory();
+
+   // Update Entry / SL / TP1 / TP2 / TRAIL Projection Lines for Latest Confirmed Signal
    if(InpShowLastTradeLines && lastSigIdx >= 0)
    {
       int barSec = MathMax(60, PeriodSeconds(_Period));
@@ -1194,8 +2110,26 @@ void UpdateVisualsAndStats(const int rates_total,
 
       SetLevelLine("ENT", tStart, tEnd, close[lastSigIdx], clrSilver, STYLE_DOT, "ENTRY");
       SetLevelLine("SL",  tStart, tEnd, SLBuffer[lastSigIdx], clrTomato, STYLE_DASH, "SL");
-      SetLevelLine("TP1", tStart, tEnd, TP1Buffer[lastSigIdx], clrMediumSeaGreen, STYLE_DASH, "TP1");
-      SetLevelLine("TP2", tStart, tEnd, TP2Buffer[lastSigIdx], clrLime, STYLE_SOLID, "TP2");
+
+      if(InpSSRNUseFixedTargets && TP1Buffer[lastSigIdx] != EMPTY_VALUE && TP2Buffer[lastSigIdx] != EMPTY_VALUE)
+      {
+         SetLevelLine("TP1", tStart, tEnd, TP1Buffer[lastSigIdx], clrMediumSeaGreen, STYLE_DASH, "TP1");
+         SetLevelLine("TP2", tStart, tEnd, TP2Buffer[lastSigIdx], clrLime, STYLE_SOLID, "TP2");
+      }
+      else
+      {
+         DeleteTargetLines();
+      }
+
+      if(inTrade && InpShowSSRNTrailLine && activeSL > 0.0 && MathAbs(activeSL - SLBuffer[lastSigIdx]) > _Point)
+      {
+         SetLevelLine("TRAIL", tStart, tEnd, activeSL, clrViolet, STYLE_DASHDOT, "TRAIL");
+      }
+      else
+      {
+         ObjectDelete(0, g_prefix + "TRAIL_Line");
+         ObjectDelete(0, g_prefix + "TRAIL_Txt");
+      }
    }
    else
    {
@@ -1205,9 +2139,9 @@ void UpdateVisualsAndStats(const int rates_total,
    if(!InpShowDashboard)
       return;
 
-   int panelW = 650;
-   int rowCount = 7 + (InpUseExternalMacroBias ? 1 : 0);
-   int panelH = 22 + rowCount * 17;
+   int panelW   = 730;
+   int rowCount = 9 + (InpUseExternalMacroBias ? 1 : 0);
+   int panelH   = 22 + rowCount * 17;
 
    string bgName = g_prefix + "BG";
    if(ObjectFind(0, bgName) < 0)
@@ -1230,27 +2164,27 @@ void UpdateVisualsAndStats(const int rates_total,
    int yTxt = InpDashY + 8;
    int dy   = 17;
 
-   // Row 1: Title
+   // Row 1: Title + Merge Mode
    string tfName = EnumToString(_Period);
    StringReplace(tfName, "PERIOD_", "");
-   string titleStr = StringFormat("LEADING CONFLUENCE PRO v2 [%s %s] | Closed-Bar Non-Repainting", _Symbol, tfName);
+   string modeTag = (InpMergeMode == MERGE_HYBRID_PRO) ? "HYBRID_PRO" : ((InpMergeMode == MERGE_SSRN_REGIME_ONLY) ? "SSRN_REGIME" : "SSRN_MA_BASE");
+   string titleStr = StringFormat("LEADING CONFLUENCE PRO v2.10 [%s %s] | Mode: %s | Closed-Bar Causal", _Symbol, tfName, modeTag);
    SetDashLabel(g_prefix + "R1", titleStr, xTxt, yTxt, clrWhite, 9);
    yTxt += dy;
 
-   // Row 2: Active Gates + Volume Source + VWAP
+   // Row 2: Active Gates + Volume Source + VWAP + SL Mode
    string volMode = "Tick";
-   if(InpVolumeSource == VOL_REAL)
-      volMode = "Real";
-   else if(InpVolumeSource == VOL_AUTO && realVol[lastClosed] > 0)
-      volMode = "Real(Auto)";
-   else if(InpVolumeSource == VOL_AUTO)
-      volMode = "Tick(Auto)";
+   if(InpVolumeSource == VOL_REAL) volMode = "Real";
+   else if(InpVolumeSource == VOL_AUTO && realVol[lastClosed] > 0) volMode = "Real(Auto)";
+   else if(InpVolumeSource == VOL_AUTO) volMode = "Tick(Auto)";
 
-   string row2 = StringFormat("Gate: %d+ (%s) | VWAP: %s(%d) | R:R 1:%.1f / 1:%.1f | Vol: %s",
+   string slTag = (InpSLMode == SL_SSRN_FIXED_ATR) ? StringFormat("%.1fATR", InpSSRNStopATR) : "Struct";
+   string row2 = StringFormat("Gate: %d+ (%s) | VWAP: %s(%d) | SL: %s | R:R 1:%.1f/1:%.1f | Vol: %s",
                               g_effMinScore,
                               g_cloudConfigLoaded ? "Cloud" : "Manual",
                               (InpVWAPMode == VWAP_ROLLING) ? "Roll" : "Sess",
                               g_effVWAPPeriod,
+                              slTag,
                               g_effTP1Mult,
                               g_effTP2Mult,
                               volMode);
@@ -1263,11 +2197,11 @@ void UpdateVisualsAndStats(const int rates_total,
    string mlTxt    = "OFF";
    if(g_mlLoaded && lastClosed >= g_calcStart + 2)
    {
-      double rngLC = high[lastClosed] - low[lastClosed];
-      double clvLC = (rngLC > _Point * 0.1) ? (((close[lastClosed] - low[lastClosed]) - (high[lastClosed] - close[lastClosed])) / rngLC) : 0.0;
-      double sd3LC = g_delta[lastClosed] + g_delta[lastClosed - 1] + g_delta[lastClosed - 2];
-      double sv3LC = MathMax(1.0, g_effVol[lastClosed] + g_effVol[lastClosed - 1] + g_effVol[lastClosed - 2]);
-      double nd3LC = sd3LC / sv3LC;
+      double rngLC  = high[lastClosed] - low[lastClosed];
+      double clvLC  = (rngLC > _Point * 0.1) ? (((close[lastClosed] - low[lastClosed]) - (high[lastClosed] - close[lastClosed])) / rngLC) : 0.0;
+      double sd3LC  = g_delta[lastClosed] + g_delta[lastClosed - 1] + g_delta[lastClosed - 2];
+      double sv3LC  = MathMax(1.0, g_effVol[lastClosed] + g_effVol[lastClosed - 1] + g_effVol[lastClosed - 2]);
+      double nd3LC  = sd3LC / sv3LC;
       double bFvgLC = (g_fvgDispState[lastClosed] > 0) ? 1.0 : 0.0;
       double sFvgLC = (g_fvgDispState[lastClosed] < 0) ? 1.0 : 0.0;
       double pBuyLC  = EvaluateMLWinProb(1, g_ofi[lastClosed], nd3LC, g_rvol[lastClosed], g_vwapZ[lastClosed], RegimeBuffer[lastClosed], g_htfBias[lastClosed], clvLC, g_atrPct[lastClosed], bFvgLC, g_cachedMacroBias);
@@ -1285,19 +2219,19 @@ void UpdateVisualsAndStats(const int rates_total,
    SetDashLabel(g_prefix + "RCloud", rowCloud, xTxt, yTxt, cloudClr, 9);
    yTxt += dy;
 
-   // Row 4: Live Closed-Bar Microstructure
+   // Row 4: Closed-Bar Microstructure + KER
    double ofiVal  = g_ofi[lastClosed];
    double rvolVal = g_rvol[lastClosed];
    double zVal    = g_vwapZ[lastClosed];
+   double kerVal  = RegimeBuffer[lastClosed];
+   string kerTxt  = (kerVal >= 0.38) ? "Trend" : ((kerVal < 0.22) ? "Chop" : "Bal");
    color microClr = (ofiVal >= 0.20) ? clrLimeGreen : ((ofiVal <= -0.20) ? clrTomato : clrSilver);
-   string row3 = StringFormat("Micro[Closed]: OFI %+.2f | RVOL %.2fx | VWAP-Z %+.2f",
-                              ofiVal, rvolVal, zVal);
+   string row3 = StringFormat("Micro[Closed]: OFI %+.2f | RVOL %.2fx | VWAP-Z %+.2f | KER %.2f (%s)",
+                              ofiVal, rvolVal, zVal, kerVal, kerTxt);
    SetDashLabel(g_prefix + "R3", row3, xTxt, yTxt, microClr, 9);
    yTxt += dy;
 
-   // Row 5: Regime & Causal HTF & Squeeze
-   double kerVal = RegimeBuffer[lastClosed];
-   string kerTxt = (kerVal >= 0.38) ? "Trending" : ((kerVal < 0.22) ? "Chop/Range" : "Balanced");
+   // Row 5: Causal HTF Bias + SSRN EMA50/200 Regime + Squeeze
    string htfTxt = "OFF";
    if(InpUseHTFFilter && g_resolvedHTF != _Period)
    {
@@ -1306,14 +2240,30 @@ void UpdateVisualsAndStats(const int rates_total,
       string biasLabel = (g_htfBias[lastClosed] > 0) ? "BULL" : ((g_htfBias[lastClosed] < 0) ? "BEAR" : "NEUT");
       htfTxt = htfShort + ":" + biasLabel;
    }
-   string sqzTxt = (g_sqzOn[lastClosed] == 1) ? StringFormat("ON(%d)", g_sqzCount[lastClosed]) : "OFF";
-   color regClr  = (g_sqzOn[lastClosed] == 1) ? clrGold : clrDeepSkyBlue;
-   string row4 = StringFormat("Regime: KER %.2f (%s) | HTF %s | Sqz %s",
-                              kerVal, kerTxt, htfTxt, sqzTxt);
+   string ssrnTfTxt = EnumToString(g_resolvedSSRNTF);
+   StringReplace(ssrnTfTxt, "PERIOD_", "");
+   int    ssrnDirLC = (int)MathRound(SSRNRegimeBuffer[lastClosed]);
+   string ssrnLabel = (ssrnDirLC > 0) ? "BULL" : ((ssrnDirLC < 0) ? "BEAR" : "NEUT");
+   string sqzTxt    = (g_sqzOn[lastClosed] == 1) ? StringFormat("ON(%d)", g_sqzCount[lastClosed]) : "OFF";
+   color  regClr    = (ssrnDirLC > 0) ? clrMediumSpringGreen : ((ssrnDirLC < 0) ? clrLightSalmon : clrDeepSkyBlue);
+   string row4 = StringFormat("Regime: v2-HTF %s | SSRN(%s) %s (Sep %.2f ATR) | Sqz %s",
+                              htfTxt, ssrnTfTxt, ssrnLabel, SSRNSepATRBuffer[lastClosed], sqzTxt);
    SetDashLabel(g_prefix + "R4", row4, xTxt, yTxt, regClr, 9);
    yTxt += dy;
 
-   // Row 6 (Optional): External Macro / On-Chain / ETF Bridge
+   // Row 6: SSRN Hygiene, Spread & Activity Limits
+   bool   timeOkLC = CausalEntryTimeAllowed(time[lastClosed]);
+   string timeTag  = timeOkLC ? "TimeOK" : "Filtered";
+   string dayCap   = (InpMaxSignalsPerDay > 0) ? StringFormat("%d/%d", g_daySigCount[lastClosed], InpMaxSignalsPerDay) : StringFormat("%d/Inf", g_daySigCount[lastClosed]);
+   color  hygClr   = (g_liveSizing.spread_atr > InpSSRNMaxSpreadATR || !timeOkLC) ? clrGold : clrLightSteelBlue;
+   string rowHyg   = StringFormat("Hygiene: Spr/ATR %.3f (Max %.2f) | Ext<=%.1fATR | Gap<=%.1fATR | DaySig %s | %s",
+                                  g_liveSizing.spread_atr, InpSSRNMaxSpreadATR,
+                                  InpSSRNMaxExtensionATR, InpSSRNMaxOpenGapATR,
+                                  dayCap, timeTag);
+   SetDashLabel(g_prefix + "RHyg", rowHyg, xTxt, yTxt, hygClr, 9);
+   yTxt += dy;
+
+   // Row 7 (Optional): External Macro / On-Chain / ETF Bridge
    if(InpUseExternalMacroBias)
    {
       color extClr = (g_cachedMacroBias > 15) ? clrLimeGreen : ((g_cachedMacroBias < -15) ? clrTomato : clrSilver);
@@ -1329,30 +2279,50 @@ void UpdateVisualsAndStats(const int rates_total,
       ObjectDelete(0, g_prefix + "RExt");
    }
 
-   // Row 7: Causal Historical Performance Stats
-   double winPct = (closedTrades > 0) ? (100.0 * (double)tp1Wins / (double)closedTrades) : 0.0;
-   double totalR = 0.5 * g_effTP1Mult * (double)tp1Wins + 0.5 * g_effTP2Mult * (double)tp2Wins - 1.0 * (double)losses;
-   double expR   = (closedTrades > 0) ? (totalR / (double)closedTrades) : 0.0;
-   color statClr = (expR > 0.0) ? clrMediumSpringGreen : ((closedTrades == 0) ? clrSilver : clrLightSalmon);
-   string row5 = StringFormat("Causal Stats: %d sig (%d closed, %d open) | TP1 Win %.1f%% | TP2 %d | Exp %+.2fR",
-                              totalSignals, closedTrades, openTrades, winPct, tp2Wins, expR);
+   // Row 8: SSRN Risk Sizing Preview, Cost Audit & Equity Drawdown Guard
+   string eqWarn = g_eqPeakLocked ? "PEAK_LOCK" : (g_eqDayLocked ? "DAY_LOCK" : "EqOK");
+   color  szClr  = (g_liveSizing.valid && eqWarn == "EqOK") ? clrAquamarine : clrOrange;
+   string rowSz  = StringFormat("RiskAudit: Lots %.2f (%.2f%%) | Cost/Risk %.1f%% | MinEq %.0f %s | %s | %s",
+                                g_liveSizing.lots,
+                                InpRiskPercent,
+                                g_liveSizing.cost_risk_frac * 100.0,
+                                g_liveSizing.min_equity,
+                                AccountInfoString(ACCOUNT_CURRENCY),
+                                g_liveSizing.status,
+                                eqWarn);
+   SetDashLabel(g_prefix + "RSz", rowSz, xTxt, yTxt, szClr, 9);
+   yTxt += dy;
+
+   // Row 9: Causal Historical Performance Stats (Single-Position Sim + TP/Trail Exits)
+   double winPct  = (closedTrades > 0) ? (100.0 * (double)totalWins / (double)closedTrades) : 0.0;
+   double expR    = (closedTrades > 0) ? (totalR / (double)closedTrades) : 0.0;
+   color  statClr = (expR > 0.0) ? clrMediumSpringGreen : ((closedTrades == 0) ? clrSilver : clrLightSalmon);
+   string row5 = StringFormat("Causal Sim: %d sig -> %d trades (%d open) | Win %.1f%% | TP2 %d | Trail/BE %d | Exp %+.2fR",
+                              totalSignals, closedTrades, openTrades, winPct, tp2Wins, trailBeWins, expR);
    SetDashLabel(g_prefix + "R5", row5, xTxt, yTxt, statClr, 9);
    yTxt += dy;
 
-   // Row 8: Latest Confirmed Signal Plan
+   // Row 10: Latest Confirmed Signal & Exit/Trail Plan
    if(lastSigIdx >= 0)
    {
-      bool lastIsBuy = (BuySignalBuffer[lastSigIdx] != EMPTY_VALUE);
-      int  lastScore = (int)MathAbs(ScoreBuffer[lastSigIdx]);
-      string mlTag   = (MLProbBuffer[lastSigIdx] > 0.0) ? StringFormat(" ML %.0f%%", MLProbBuffer[lastSigIdx] * 100.0) : "";
-      string row6 = StringFormat("Last: %s [%s] Score %d%s | @ %s | SL %s | TP1 %s",
+      bool   lastIsBuy = (BuySignalBuffer[lastSigIdx] != EMPTY_VALUE);
+      int    lastScore = (int)MathAbs(ScoreBuffer[lastSigIdx]);
+      string mlTag     = (MLProbBuffer[lastSigIdx] > 0.0) ? StringFormat(" ML%.0f%%", MLProbBuffer[lastSigIdx] * 100.0) : "";
+      string trlTag    = "";
+      if(inTrade && activeSL > 0.0 && MathAbs(activeSL - SLBuffer[lastSigIdx]) > _Point)
+         trlTag = StringFormat(" | Trail %s", DoubleToString(activeSL, _Digits));
+      else if(!inTrade && g_lastSimExitReason != EXIT_NONE)
+         trlTag = StringFormat(" | Exit:%s", ExitReasonName(g_lastSimExitReason));
+
+      string row6 = StringFormat("Last: %s [%s] S%d%s | @ %s | SL %s | TP1 %s%s",
                                  lastIsBuy ? "BUY" : "SELL",
                                  PlaybookName(g_sigPlaybook[lastSigIdx]),
                                  lastScore,
                                  mlTag,
                                  DoubleToString(close[lastSigIdx], _Digits),
                                  DoubleToString(SLBuffer[lastSigIdx], _Digits),
-                                 DoubleToString(TP1Buffer[lastSigIdx], _Digits));
+                                 DoubleToString(TP1Buffer[lastSigIdx], _Digits),
+                                 trlTag);
       SetDashLabel(g_prefix + "R6", row6, xTxt, yTxt, lastIsBuy ? clrLime : clrTomato, 9);
    }
    else
@@ -1366,57 +2336,102 @@ void UpdateVisualsAndStats(const int rates_total,
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   g_prefix      = StringFormat("LCP_%I64d_%u_", ChartID(), GetTickCount());
-   g_resolvedHTF = ResolveHTF(InpHTFTimeframe, _Period);
+   g_prefix         = StringFormat("LCP_%I64d_%u_", ChartID(), GetTickCount());
+   g_resolvedHTF    = ResolveHTF(InpHTFTimeframe, _Period);
+   g_resolvedSSRNTF = ResolveSSRNTrendTF(InpSSRNTrendTF, _Period);
 
    SetIndexBuffer(0,  BuySignalBuffer,  INDICATOR_DATA);
    SetIndexBuffer(1,  SellSignalBuffer, INDICATOR_DATA);
    SetIndexBuffer(2,  VWAPBuffer,       INDICATOR_DATA);
    SetIndexBuffer(3,  VWAPUpperBuffer,  INDICATOR_DATA);
    SetIndexBuffer(4,  VWAPLowerBuffer,  INDICATOR_DATA);
-   SetIndexBuffer(5,  ScoreBuffer,      INDICATOR_CALCULATIONS);
-   SetIndexBuffer(6,  SLBuffer,         INDICATOR_CALCULATIONS);
-   SetIndexBuffer(7,  TP1Buffer,        INDICATOR_CALCULATIONS);
-   SetIndexBuffer(8,  TP2Buffer,        INDICATOR_CALCULATIONS);
-   SetIndexBuffer(9,  RegimeBuffer,     INDICATOR_CALCULATIONS);
-   SetIndexBuffer(10, MLProbBuffer,     INDICATOR_CALCULATIONS);
+   SetIndexBuffer(5,  EntryEMABuffer,   INDICATOR_DATA);
+   SetIndexBuffer(6,  ExitSignalBuffer, INDICATOR_DATA);
+   SetIndexBuffer(7,  TrailStopBuffer,  INDICATOR_DATA);
+   SetIndexBuffer(8,  ScoreBuffer,      INDICATOR_CALCULATIONS);
+   SetIndexBuffer(9,  SLBuffer,         INDICATOR_CALCULATIONS);
+   SetIndexBuffer(10, TP1Buffer,        INDICATOR_CALCULATIONS);
+   SetIndexBuffer(11, TP2Buffer,        INDICATOR_CALCULATIONS);
+   SetIndexBuffer(12, RegimeBuffer,     INDICATOR_CALCULATIONS);
+   SetIndexBuffer(13, MLProbBuffer,     INDICATOR_CALCULATIONS);
+   SetIndexBuffer(14, SSRNRegimeBuffer, INDICATOR_CALCULATIONS);
+   SetIndexBuffer(15, SSRNSepATRBuffer, INDICATOR_CALCULATIONS);
 
    ArraySetAsSeries(BuySignalBuffer,  false);
    ArraySetAsSeries(SellSignalBuffer, false);
    ArraySetAsSeries(VWAPBuffer,       false);
    ArraySetAsSeries(VWAPUpperBuffer,  false);
    ArraySetAsSeries(VWAPLowerBuffer,  false);
+   ArraySetAsSeries(EntryEMABuffer,   false);
+   ArraySetAsSeries(ExitSignalBuffer, false);
+   ArraySetAsSeries(TrailStopBuffer,  false);
    ArraySetAsSeries(ScoreBuffer,      false);
    ArraySetAsSeries(SLBuffer,         false);
    ArraySetAsSeries(TP1Buffer,        false);
    ArraySetAsSeries(TP2Buffer,        false);
    ArraySetAsSeries(RegimeBuffer,     false);
    ArraySetAsSeries(MLProbBuffer,     false);
+   ArraySetAsSeries(SSRNRegimeBuffer, false);
+   ArraySetAsSeries(SSRNSepATRBuffer, false);
 
    PlotIndexSetInteger(0, PLOT_ARROW, 233);
    PlotIndexSetInteger(1, PLOT_ARROW, 234);
+   PlotIndexSetInteger(6, PLOT_ARROW, 251);
    PlotIndexSetInteger(0, PLOT_ARROW_SHIFT, 10);
    PlotIndexSetInteger(1, PLOT_ARROW_SHIFT, -10);
+   PlotIndexSetInteger(6, PLOT_ARROW_SHIFT, 0);
 
-   for(int p = 0; p < 5; p++)
+   for(int p = 0; p < 8; p++)
       PlotIndexSetDouble(p, PLOT_EMPTY_VALUE, EMPTY_VALUE);
 
    g_prevRatesTotal       = 0;
    g_calcStart            = 0;
    g_lastAlertBarTime     = 0;
+   g_lastDecisionCSVTime  = 0;
    g_lastMacroCheck       = 0;
    g_lastCloudCheck       = 0;
    g_htfPendingSync       = false;
+   g_ssrnHtfPendingSync   = false;
    g_cloudConfigDirty     = false;
    g_lastVisualRatesTotal = 0;
    g_lastVisualMacroBias  = 999999;
+
+   g_eqDayStart   = 0;
+   g_eqDayRef     = 0.0;
+   g_eqPeakRef    = 0.0;
+   g_eqDayLocked  = false;
+   g_eqPeakLocked = false;
+   UpdateEquityAdvisory();
+
+   LoadSSRNBlackouts();
+
+   g_csvHandle = INVALID_HANDLE;
+   if(InpWriteDecisionCSV)
+   {
+      string tag = InpRunTag;
+      StringReplace(tag, "/", "_");
+      StringReplace(tag, "\\", "_");
+      StringReplace(tag, ":", "_");
+      string tfS = EnumToString(_Period);
+      StringReplace(tfS, "PERIOD_", "");
+      string csvName = StringFormat("LCP_Decisions_%s_%s_%s.csv", _Symbol, tfS, tag);
+      int commonFlag = InpUseCommonFiles ? FILE_COMMON : 0;
+      g_csvHandle = FileOpen(csvName, FILE_WRITE | FILE_CSV | FILE_ANSI | commonFlag, ',');
+      if(g_csvHandle == INVALID_HANDLE)
+         PrintFormat("LeadingConfluencePro: Decision CSV '%s' could not be opened (err=%d).", csvName, GetLastError());
+      else
+         FileWrite(g_csvHandle, "bar_time_utc", "symbol", "tf", "merge_mode", "ssrn_regime",
+                   "sep_atr", "htf_bias", "ker", "ofi", "rvol", "vwap_z", "atr_pct",
+                   "macro_bias", "signal_dir", "playbook", "score", "ml_prob",
+                   "sl", "tp1", "tp2", "spread_atr", "exit_reason");
+   }
 
    RefreshExternalMacroBias(true);
    RefreshCloudAdaptiveAndML(true);
 
    IndicatorSetInteger(INDICATOR_DIGITS, _Digits);
    IndicatorSetString(INDICATOR_SHORTNAME,
-                      StringFormat("LeadingConfluencePro v2 (%d+)", g_effMinScore));
+                      StringFormat("LeadingConfluencePro v2.10 (%d+)", g_effMinScore));
 
    return INIT_SUCCEEDED;
 }
@@ -1426,6 +2441,11 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+   if(g_csvHandle != INVALID_HANDLE)
+   {
+      FileClose(g_csvHandle);
+      g_csvHandle = INVALID_HANDLE;
+   }
    ObjectsDeleteAll(0, g_prefix);
    ChartRedraw(0);
 }
@@ -1451,12 +2471,14 @@ int OnCalculate(const int rates_total,
    ArraySetAsSeries(close,       false);
    ArraySetAsSeries(tick_volume, false);
    ArraySetAsSeries(volume,      false);
+   ArraySetAsSeries(spread,      false);
 
    // Refresh Cloud Feeds & Adaptive Params/ML Weights (throttled every 60s)
    RefreshExternalMacroBias(prev_calculated == 0);
    RefreshCloudAdaptiveAndML(prev_calculated == 0);
 
-   int warmup = MathMax(g_effVWAPPeriod, MathMax(InpSqzPeriod, MathMax(InpVolPeriod, MathMax(InpATRPeriod, InpKERPeriod))))
+   int ssrnMaxLB = MathMax(InpSSRNBreakoutBars + 2, MathMax(InpSSRNPullbackBars + 2, MathMax(InpSSRNEntryEMA, InpSSRNBaselinePeriod)));
+   int warmup = MathMax(g_effVWAPPeriod, MathMax(InpSqzPeriod, MathMax(InpVolPeriod, MathMax(InpATRPeriod, MathMax(InpKERPeriod, ssrnMaxLB)))))
                 + InpPivotLeft + InpPivotRight + 10;
    if(warmup < 65) warmup = 65;
 
@@ -1470,12 +2492,20 @@ int OnCalculate(const int rates_total,
          htfJustSynced = true;
    }
 
+   bool ssrnHtfJustSynced = false;
+   if(g_ssrnHtfPendingSync && InpMergeMode != MERGE_SSRN_MA_BASELINE)
+   {
+      if(Bars(_Symbol, g_resolvedSSRNTF) > 0)
+         ssrnHtfJustSynced = true;
+   }
+
    bool fullRecalc = (prev_calculated == 0 ||
                       prev_calculated > rates_total ||
                       g_prevRatesTotal == 0 ||
                       rates_total < g_prevRatesTotal ||
                       rates_total > g_prevRatesTotal + 2 ||
                       htfJustSynced ||
+                      ssrnHtfJustSynced ||
                       g_cloudConfigDirty);
    g_cloudConfigDirty = false;
 
@@ -1488,12 +2518,19 @@ int OnCalculate(const int rates_total,
       ArrayInitialize(VWAPBuffer,       EMPTY_VALUE);
       ArrayInitialize(VWAPUpperBuffer,  EMPTY_VALUE);
       ArrayInitialize(VWAPLowerBuffer,  EMPTY_VALUE);
+      ArrayInitialize(EntryEMABuffer,   EMPTY_VALUE);
+      ArrayInitialize(ExitSignalBuffer, EMPTY_VALUE);
+      ArrayInitialize(TrailStopBuffer,  EMPTY_VALUE);
       ArrayInitialize(ScoreBuffer,      0.0);
       ArrayInitialize(SLBuffer,         EMPTY_VALUE);
       ArrayInitialize(TP1Buffer,        EMPTY_VALUE);
       ArrayInitialize(TP2Buffer,        EMPTY_VALUE);
       ArrayInitialize(RegimeBuffer,     0.0);
       ArrayInitialize(MLProbBuffer,     0.0);
+      ArrayInitialize(SSRNRegimeBuffer, 0.0);
+      ArrayInitialize(SSRNSepATRBuffer, 0.0);
+      ArrayInitialize(g_daySigCount,    0);
+      ArrayInitialize(g_exitReason,     EXIT_NONE);
 
       if(InpMaxHistoryBars > 0 && rates_total > InpMaxHistoryBars + warmup)
          g_calcStart = rates_total - InpMaxHistoryBars - warmup;
@@ -1511,16 +2548,19 @@ int OnCalculate(const int rates_total,
       start = g_calcStart;
 
    ComputeCausalHTFBias(rates_total, start, time);
+   ComputeCausalSSRNRegime(rates_total, start, time);
 
-   const double alphaFast = 2.0 / (MathMax(2, InpSqzPeriod) + 1.0);
-   const double alphaSlow = 2.0 / 51.0;
-   const int    atrLen    = MathMax(2, InpATRPeriod);
-   const int    volLen    = MathMax(2, InpVolPeriod);
-   const int    sqzLen    = MathMax(5, InpSqzPeriod);
-   const int    kerLen    = MathMax(2, InpKERPeriod);
-   const int    minScore  = g_effMinScore;
+   const double alphaFast     = 2.0 / (MathMax(2, InpSqzPeriod) + 1.0);
+   const double alphaSlow     = 2.0 / 51.0;
+   const double alphaEntryEMA = 2.0 / (MathMax(2, InpSSRNEntryEMA) + 1.0);
+   const int    basePeriod    = MathMax(2, InpSSRNBaselinePeriod);
+   const int    atrLen        = MathMax(2, InpATRPeriod);
+   const int    volLen        = MathMax(2, InpVolPeriod);
+   const int    sqzLen        = MathMax(5, InpSqzPeriod);
+   const int    kerLen        = MathMax(2, InpKERPeriod);
+   const int    minScore      = g_effMinScore;
 
-   //--- Pass 1: Continuous Microstructure, Fair Value, Squeeze, Regime & Swings [start .. rates_total - 1]
+   //--- Pass 1: Continuous Microstructure, Fair Value, Squeeze, Entry EMA, Baseline SMA & Swings [start .. rates_total - 1]
    for(int i = start; i < rates_total; i++)
    {
       g_effVol[i] = GetEffectiveVolume(i, tick_volume, volume);
@@ -1571,17 +2611,27 @@ int OnCalculate(const int rates_total,
          g_atrPct[i] = 50.0;
       }
 
-      // EMAs
+      // EMAs + SSRN Entry EMA + SSRN Slow SMA Baseline
       if(i == g_calcStart)
       {
-         g_emaFast[i] = close[i];
-         g_emaSlow[i] = close[i];
+         g_emaFast[i]  = close[i];
+         g_emaSlow[i]  = close[i];
+         g_entryEMA[i] = close[i];
       }
       else
       {
-         g_emaFast[i] = alphaFast * close[i] + (1.0 - alphaFast) * g_emaFast[i - 1];
-         g_emaSlow[i] = alphaSlow * close[i] + (1.0 - alphaSlow) * g_emaSlow[i - 1];
+         g_emaFast[i]  = alphaFast     * close[i] + (1.0 - alphaFast)     * g_emaFast[i - 1];
+         g_emaSlow[i]  = alphaSlow     * close[i] + (1.0 - alphaSlow)     * g_emaSlow[i - 1];
+         g_entryEMA[i] = alphaEntryEMA * close[i] + (1.0 - alphaEntryEMA) * g_entryEMA[i - 1];
       }
+      EntryEMABuffer[i] = InpShowSSRNEntryEMA ? g_entryEMA[i] : EMPTY_VALUE;
+
+      int baseStart = MathMax(g_calcStart, i - basePeriod + 1);
+      int baseN     = i - baseStart + 1;
+      double sumBase = 0.0;
+      for(int k = baseStart; k <= i; k++)
+         sumBase += close[k];
+      g_baseSMA[i] = (baseN >= basePeriod) ? (sumBase / (double)baseN) : 0.0;
 
       // Bulk Volume Classification (BVC) + CLV Order Flow Imbalance
       double bvcNet = 0.0;
@@ -1620,11 +2670,17 @@ int OnCalculate(const int rates_total,
       else if((sFvg || sDsp) && !(bFvg || bDsp)) g_fvgDispState[i] = -1;
       else                                       g_fvgDispState[i] = 0;
 
-      // Session Anchor Tracking
+      // Session Anchor & Bar-Count Tracking
       if(i == g_calcStart || GetSessionKey(time[i]) != GetSessionKey(time[i - 1]))
-         g_sessStart[i] = i;
+      {
+         g_sessStart[i]    = i;
+         g_sessBarCount[i] = 1;
+      }
       else
-         g_sessStart[i] = g_sessStart[i - 1];
+      {
+         g_sessStart[i]    = g_sessStart[i - 1];
+         g_sessBarCount[i] = g_sessBarCount[i - 1] + 1;
+      }
 
       // Two-Pass Numerically Stable VWAP & Deviation Bands
       int vwapStart = g_calcStart;
@@ -1838,6 +2894,9 @@ int OnCalculate(const int rates_total,
    g_sigPlaybook[liveIdx]    = PB_NONE;
 
    int sigLoopEnd = rates_total - 2;
+   MqlTick latestTick;
+   bool hasLatestTick = SymbolInfoTick(_Symbol, latestTick) && (latestTick.bid > 0.0 && latestTick.ask >= latestTick.bid);
+
    for(int i = start; i <= sigLoopEnd; i++)
    {
       BuySignalBuffer[i]  = EMPTY_VALUE;
@@ -1851,17 +2910,19 @@ int OnCalculate(const int rates_total,
 
       if(i == g_calcStart)
       {
-         g_lastSigBar[i] = -10000;
-         g_lastSigDir[i] = 0;
-         g_buyReset[i]   = 1;
-         g_sellReset[i]  = 1;
+         g_lastSigBar[i]  = -10000;
+         g_lastSigDir[i]  = 0;
+         g_buyReset[i]    = 1;
+         g_sellReset[i]   = 1;
+         g_daySigCount[i] = 0;
          continue;
       }
 
-      g_lastSigBar[i] = g_lastSigBar[i - 1];
-      g_lastSigDir[i] = g_lastSigDir[i - 1];
-      g_buyReset[i]   = g_buyReset[i - 1];
-      g_sellReset[i]  = g_sellReset[i - 1];
+      g_lastSigBar[i]  = g_lastSigBar[i - 1];
+      g_lastSigDir[i]  = g_lastSigDir[i - 1];
+      g_buyReset[i]    = g_buyReset[i - 1];
+      g_sellReset[i]   = g_sellReset[i - 1];
+      g_daySigCount[i] = (DayStartTime(time[i]) != DayStartTime(time[i - 1])) ? 0 : g_daySigCount[i - 1];
 
       if(close[i] < g_vwapVal[i]) g_buyReset[i]  = 1;
       if(close[i] > g_vwapVal[i]) g_sellReset[i] = 1;
@@ -1869,412 +2930,640 @@ int OnCalculate(const int rates_total,
       if(i < g_calcStart + warmup)
          continue;
 
-      double atr = g_atr[i];
+      double atr      = g_atr[i];
+      double prevAtr  = g_atr[i - 1];
       double barRange = high[i] - low[i];
-      if(atr <= _Point * 2.0 || barRange < 0.25 * atr)
-         continue;
-
-      bool recentSqz = (g_sqzCount[i - 1] >= InpMinSqueezeBars ||
-                        g_sqzCount[i - 2] >= InpMinSqueezeBars ||
-                        g_sqzCount[i - 3] >= InpMinSqueezeBars);
-      if(g_atrPct[i] < 8.0 && !recentSqz)
+      if(atr <= _Point * 2.0 || prevAtr <= _Point * 2.0)
          continue;
 
       if((i - g_lastSigBar[i - 1]) < InpMinBarsBetweenSignals)
          continue;
 
-      double clv = (barRange > _Point * 0.1) ? (((close[i] - low[i]) - (high[i] - close[i])) / barRange) : 0.0;
-      double bodyOpenClose = close[i] - open[i];
-      double lowerWick = MathMin(open[i], close[i]) - low[i];
-      double upperWick = high[i] - MathMax(open[i], close[i]);
+      // SSRN Global Signal Hygiene & Activity Filters (100% Causal)
+      if(InpMaxSignalsPerDay > 0 && g_daySigCount[i] >= InpMaxSignalsPerDay)
+         continue;
+      if(!CausalEntryTimeAllowed(time[i]))
+         continue;
+      if(InpSSRNMaxSignalRangeATR > 0.0 && barRange > InpSSRNMaxSignalRangeATR * prevAtr)
+         continue;
+      if(InpSSRNMaxOpenGapATR > 0.0 && MathAbs(open[i + 1] - close[i]) > InpSSRNMaxOpenGapATR * atr)
+         continue;
+      if(InpMergeMode != MERGE_SSRN_MA_BASELINE && InpSSRNMaxExtensionATR > 0.0 &&
+         MathAbs(close[i] - g_entryEMA[i]) > InpSSRNMaxExtensionATR * atr)
+         continue;
 
-      // VSA Absorption Signatures
-      bool bullVSA = (g_rvol[i] >= 1.30 && clv >= 0.35 &&
-                      (lowerWick >= 0.35 * barRange || bodyOpenClose >= 0.50 * atr));
-      bool bearVSA = (g_rvol[i] >= 1.30 && clv <= -0.35 &&
-                      (upperWick >= 0.35 * barRange || (-bodyOpenClose) >= 0.50 * atr));
-
-      // Fair Value Gap & Displacement Urgency Flags
-      bool bullFVG  = (i >= g_calcStart + 2 && low[i] > high[i - 2]);
-      bool bearFVG  = (i >= g_calcStart + 2 && high[i] < low[i - 2]);
-      bool bullDisp = (bodyOpenClose >= 0.65 * atr && g_rvol[i] >= 1.25 && clv >= 0.50);
-      bool bearDisp = ((-bodyOpenClose) >= 0.65 * atr && g_rvol[i] >= 1.25 && clv <= -0.50);
-      double bullFvgDisp = (bullFVG || bullDisp) ? 1.0 : 0.0;
-      double bearFvgDisp = (bearFVG || bearDisp) ? 1.0 : 0.0;
-
-      double sumDelta3 = g_delta[i] + g_delta[i - 1] + g_delta[i - 2];
-      double sumVol3   = g_effVol[i] + g_effVol[i - 1] + g_effVol[i - 2];
-      double netDelta3 = (sumVol3 > 0.0) ? (sumDelta3 / sumVol3) : 0.0;
-
-      double vwapSlope = g_vwapVal[i] - g_vwapVal[i - 3];
-      double ker       = RegimeBuffer[i];
-      int    htfBias   = g_htfBias[i];
-      double z         = g_vwapZ[i];
-
-      //--- Check Playbooks (Bullish)
-      bool trigBullSweep = false;
-      bool trigBullSqz   = false;
-      bool trigBullPull  = false;
-      double bullStructExtreme = low[i];
-
-      if(g_effEnSweep && g_swLow[i - 1] > 0.0 && (i - g_swLowBar[i - 1]) <= 80)
+      if((InpSSRNUseSpreadFilter || InpMergeMode != MERGE_HYBRID_PRO) && InpSSRNMaxSpreadATR > 0.0)
       {
-         double swL = g_swLow[i - 1];
-         bool sweptNow  = (low[i] < swL - 0.05 * atr);
-         bool sweptPrev = (low[i - 1] < swL - 0.05 * atr && low[i - 1] > swL - 2.5 * atr);
-         if((sweptNow || sweptPrev) &&
-            close[i] > swL &&
-            (close[i] > open[i] || clv >= 0.45) &&
-            g_ofi[i] >= 0.15 &&
-            z <= 1.2 &&
-            !(htfBias == -1 && ker >= 0.45))
+         double barSprATR = 0.0;
+         if(i == sigLoopEnd && hasLatestTick)
+            barSprATR = (latestTick.ask - latestTick.bid) / atr;
+         else if(spread[i] > 0)
+            barSprATR = ((double)spread[i] * _Point) / atr;
+
+         if(barSprATR > InpSSRNMaxSpreadATR)
+            continue;
+      }
+
+      bool allowSideLong  = (InpSidePolicy != SIDE_SHORT_ONLY);
+      bool allowSideShort = (InpSidePolicy != SIDE_LONG_ONLY);
+
+      bool vwapSideBuyOk  = true;
+      bool vwapSideSellOk = true;
+      if(InpSSRNRequireVWAPSide)
+      {
+         int minSessB = MathMax(1, InpVWAPMinBars);
+         bool minBarsReady = (g_sessBarCount[i] >= minSessB);
+         vwapSideBuyOk  = (minBarsReady && close[i] > g_vwapVal[i]);
+         vwapSideSellOk = (minBarsReady && close[i] < g_vwapVal[i]);
+      }
+
+      int    finalDir         = 0;
+      int    finalScore       = 0;
+      int    finalPB          = PB_NONE;
+      double finalProb        = 0.0;
+      double finalExtreme     = close[i];
+      bool   skipStructClamp  = false;
+
+      //--- Shared SSRN Channel Breakout & EMA Pullback Evaluation
+      int    ssrnDir = (int)MathRound(SSRNRegimeBuffer[i]);
+      double ssrnSep = SSRNSepATRBuffer[i];
+
+      bool trigBullCh  = false;
+      bool trigBearCh  = false;
+      bool trigBullEma = false;
+      bool trigBearEma = false;
+
+      if(InpMergeMode != MERGE_SSRN_MA_BASELINE && ssrnDir != 0)
+      {
+         int chLen = MathMax(2, InpSSRNBreakoutBars);
+         int chBeg = MathMax(g_calcStart, i - chLen);
+         double chHigh = high[chBeg];
+         double chLow  = low[chBeg];
+         for(int k = chBeg + 1; k < i; k++)
          {
-            trigBullSweep = true;
-            bullStructExtreme = sweptPrev ? MathMin(low[i], low[i - 1]) : low[i];
+            if(high[k] > chHigh) chHigh = high[k];
+            if(low[k]  < chLow)  chLow  = low[k];
+         }
+         if(InpEnableSSRNBreakout && InpSSRNEntryPolicy != SSRN_PULLBACK_ONLY)
+         {
+            if(ssrnDir == 1)  trigBullCh = CoreBreakout(1,  close[i], chHigh, chLow, InpSSRNBreakoutBufATR * prevAtr);
+            if(ssrnDir == -1) trigBearCh = CoreBreakout(-1, close[i], chHigh, chLow, InpSSRNBreakoutBufATR * prevAtr);
+         }
+
+         if(InpEnableSSRNPullback && InpSSRNEntryPolicy != SSRN_BREAKOUT_ONLY)
+         {
+            int pbLen = MathMax(1, InpSSRNPullbackBars);
+            int pbBeg = MathMax(g_calcStart, i - pbLen + 1);
+            bool emaTouched = false;
+            double band = InpSSRNPullbackTolATR * prevAtr;
+            for(int j = pbBeg; j <= i; j++)
+            {
+               if(low[j] <= g_entryEMA[j] + band && high[j] >= g_entryEMA[j] - band)
+               {
+                  emaTouched = true;
+                  break;
+               }
+            }
+            if(ssrnDir == 1)  trigBullEma = CorePullback(1,  open[i], close[i], g_entryEMA[i], emaTouched);
+            if(ssrnDir == -1) trigBearEma = CorePullback(-1, open[i], close[i], g_entryEMA[i], emaTouched);
          }
       }
 
-      if(g_effEnSqueeze)
+      if(InpMergeMode == MERGE_SSRN_MA_BASELINE)
       {
-         double maxHigh5 = high[i - 1];
-         for(int k = i - 5; k <= i - 1; k++)
-            if(high[k] > maxHigh5) maxHigh5 = high[k];
-
-         if(recentSqz &&
-            g_sqzOn[i] == 0 &&
-            close[i] > g_kcUpper[i] &&
-            close[i] > maxHigh5 &&
-            g_sqzMom[i] > 0.0 && g_sqzMom[i] > g_sqzMom[i - 1] &&
-            g_rvol[i] >= 1.20 &&
-            clv >= 0.35 &&
-            g_ofi[i] >= 0.25 &&
-            z <= 2.2 &&
-            (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias >= 0))
+         skipStructClamp = true;
+         if(g_baseSMA[i] > 0.0 && g_baseSMA[i - 1] > 0.0)
          {
-            trigBullSqz = true;
-            if(!trigBullSweep)
-               bullStructExtreme = MathMin(low[i], low[i - 1]);
+            int baseNow  = CoreBaseline(close[i],     g_baseSMA[i],     InpSSRNBaselineBufATR * atr);
+            int basePrev = CoreBaseline(close[i - 1], g_baseSMA[i - 1], InpSSRNBaselineBufATR * prevAtr);
+            if(baseNow == 1 && basePrev != 1 && allowSideLong && vwapSideBuyOk)
+            {
+               finalDir     = 1;
+               finalScore   = 75;
+               finalPB      = PB_MA_BASE;
+               finalExtreme = MathMin(low[i], low[i - 1]);
+            }
+            else if(baseNow == -1 && basePrev != -1 && allowSideShort && vwapSideSellOk)
+            {
+               finalDir     = -1;
+               finalScore   = 75;
+               finalPB      = PB_MA_BASE;
+               finalExtreme = MathMax(high[i], high[i - 1]);
+            }
+         }
+      }
+      else if(InpMergeMode == MERGE_SSRN_REGIME_ONLY)
+      {
+         skipStructClamp = true;
+         bool allowBuyR  = allowSideLong  && vwapSideBuyOk  && (InpAllowConsecutiveSameDir || g_lastSigDir[i - 1] != 1  || g_buyReset[i - 1] == 1);
+         bool allowSellR = allowSideShort && vwapSideSellOk && (InpAllowConsecutiveSameDir || g_lastSigDir[i - 1] != -1 || g_sellReset[i - 1] == 1);
+
+         if(allowBuyR && (trigBullCh || trigBullEma))
+         {
+            finalDir     = 1;
+            finalScore   = 80;
+            finalPB      = (trigBullCh && trigBullEma) ? PB_MULTI : (trigBullCh ? PB_CH_BREAK : PB_EMA_PULL);
+            finalExtreme = MathMin(low[i], low[i - 1]);
+         }
+         else if(allowSellR && (trigBearCh || trigBearEma))
+         {
+            finalDir     = -1;
+            finalScore   = 80;
+            finalPB      = (trigBearCh && trigBearEma) ? PB_MULTI : (trigBearCh ? PB_CH_BREAK : PB_EMA_PULL);
+            finalExtreme = MathMax(high[i], high[i - 1]);
+         }
+      }
+      else // MERGE_HYBRID_PRO (Full v2.02 Playbooks + SSRN Regime/Breakout/Pullback + Cloud ML)
+      {
+         if(barRange < 0.25 * atr)
+            continue;
+
+         bool recentSqz = (g_sqzCount[i - 1] >= InpMinSqueezeBars ||
+                           g_sqzCount[i - 2] >= InpMinSqueezeBars ||
+                           g_sqzCount[i - 3] >= InpMinSqueezeBars);
+         if(g_atrPct[i] < 8.0 && !recentSqz)
+            continue;
+
+         double clv           = (barRange > _Point * 0.1) ? (((close[i] - low[i]) - (high[i] - close[i])) / barRange) : 0.0;
+         double bodyOpenClose = close[i] - open[i];
+         double lowerWick     = MathMin(open[i], close[i]) - low[i];
+         double upperWick     = high[i] - MathMax(open[i], close[i]);
+
+         bool bullVSA = (g_rvol[i] >= 1.30 && clv >= 0.35 &&
+                         (lowerWick >= 0.35 * barRange || bodyOpenClose >= 0.50 * atr));
+         bool bearVSA = (g_rvol[i] >= 1.30 && clv <= -0.35 &&
+                         (upperWick >= 0.35 * barRange || (-bodyOpenClose) >= 0.50 * atr));
+
+         bool bullFVG     = (i >= g_calcStart + 2 && low[i] > high[i - 2]);
+         bool bearFVG     = (i >= g_calcStart + 2 && high[i] < low[i - 2]);
+         bool bullDisp    = (bodyOpenClose >= 0.65 * atr && g_rvol[i] >= 1.25 && clv >= 0.50);
+         bool bearDisp    = ((-bodyOpenClose) >= 0.65 * atr && g_rvol[i] >= 1.25 && clv <= -0.50);
+         double bullFvgDisp = (bullFVG || bullDisp) ? 1.0 : 0.0;
+         double bearFvgDisp = (bearFVG || bearDisp) ? 1.0 : 0.0;
+
+         double sumDelta3 = g_delta[i] + g_delta[i - 1] + g_delta[i - 2];
+         double sumVol3   = g_effVol[i] + g_effVol[i - 1] + g_effVol[i - 2];
+         double netDelta3 = (sumVol3 > 0.0) ? (sumDelta3 / sumVol3) : 0.0;
+
+         double vwapSlope = g_vwapVal[i] - g_vwapVal[i - 3];
+         double ker       = RegimeBuffer[i];
+         int    htfBias   = g_htfBias[i];
+         double z         = g_vwapZ[i];
+
+         //--- Check v2.02 Playbooks (Bullish)
+         bool   trigBullSweep     = false;
+         bool   trigBullSqz       = false;
+         bool   trigBullPull      = false;
+         double bullStructExtreme = low[i];
+
+         if(g_effEnSweep && g_swLow[i - 1] > 0.0 && (i - g_swLowBar[i - 1]) <= 80)
+         {
+            double swL = g_swLow[i - 1];
+            bool sweptNow  = (low[i] < swL - 0.05 * atr);
+            bool sweptPrev = (low[i - 1] < swL - 0.05 * atr && low[i - 1] > swL - 2.5 * atr);
+            if((sweptNow || sweptPrev) &&
+               close[i] > swL &&
+               (close[i] > open[i] || clv >= 0.45) &&
+               g_ofi[i] >= 0.15 &&
+               z <= 1.2 &&
+               !(htfBias == -1 && ker >= 0.45))
+            {
+               trigBullSweep = true;
+               bullStructExtreme = sweptPrev ? MathMin(low[i], low[i - 1]) : low[i];
+            }
+         }
+
+         if(g_effEnSqueeze)
+         {
+            double maxHigh5 = high[i - 1];
+            for(int k = i - 5; k <= i - 1; k++)
+               if(high[k] > maxHigh5) maxHigh5 = high[k];
+
+            if(recentSqz &&
+               g_sqzOn[i] == 0 &&
+               close[i] > g_kcUpper[i] &&
+               close[i] > maxHigh5 &&
+               g_sqzMom[i] > 0.0 && g_sqzMom[i] > g_sqzMom[i - 1] &&
+               g_rvol[i] >= 1.20 &&
+               clv >= 0.35 &&
+               g_ofi[i] >= 0.25 &&
+               z <= 2.2 &&
+               (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias >= 0))
+            {
+               trigBullSqz = true;
+               bullStructExtreme = (!trigBullSweep)
+                                   ? MathMin(low[i], low[i - 1])
+                                   : MathMin(bullStructExtreme, MathMin(low[i], low[i - 1]));
+            }
+         }
+
+         if(g_effEnPullback)
+         {
+            bool trendSupport = (InpUseHTFFilter && g_resolvedHTF != _Period && htfBias == 1) ||
+                                (ker >= 0.25 && vwapSlope > 0.0 && g_emaFast[i] > g_emaSlow[i]);
+            bool touchedVWAP  = (low[i] <= g_vwapVal[i] + 0.25 * atr) ||
+                                (low[i - 1] <= g_vwapVal[i - 1] + 0.25 * atr);
+            bool heldSupport  = (low[i] >= g_vwapVal[i] - 2.2 * g_vwapStd[i]);
+            bool confirmClose = (close[i] > open[i] && close[i] > g_vwapVal[i] && clv >= 0.35 &&
+                                 (close[i] > high[i - 1] || bodyOpenClose >= 0.40 * atr));
+
+            if(trendSupport && touchedVWAP && heldSupport && confirmClose &&
+               g_ofi[i] >= 0.20 && g_rvol[i] >= 1.00 && z <= 1.8)
+            {
+               trigBullPull = true;
+               double pullMin = MathMin(low[i], low[i - 1]);
+               bullStructExtreme = (!trigBullSweep && !trigBullSqz)
+                                   ? pullMin
+                                   : MathMin(bullStructExtreme, pullMin);
+            }
+         }
+
+         if(InpSSRNHardRegimeOnV2 && ssrnDir != 1)
+         {
+            trigBullSweep = false;
+            trigBullSqz   = false;
+            trigBullPull  = false;
+         }
+
+         //--- Check v2.02 Playbooks (Bearish)
+         bool   trigBearSweep     = false;
+         bool   trigBearSqz       = false;
+         bool   trigBearPull      = false;
+         double bearStructExtreme = high[i];
+
+         if(g_effEnSweep && g_swHigh[i - 1] > 0.0 && (i - g_swHighBar[i - 1]) <= 80)
+         {
+            double swH = g_swHigh[i - 1];
+            bool sweptNow  = (high[i] > swH + 0.05 * atr);
+            bool sweptPrev = (high[i - 1] > swH + 0.05 * atr && high[i - 1] < swH + 2.5 * atr);
+            if((sweptNow || sweptPrev) &&
+               close[i] < swH &&
+               (close[i] < open[i] || clv <= -0.45) &&
+               g_ofi[i] <= -0.15 &&
+               z >= -1.2 &&
+               !(htfBias == 1 && ker >= 0.45))
+            {
+               trigBearSweep = true;
+               bearStructExtreme = sweptPrev ? MathMax(high[i], high[i - 1]) : high[i];
+            }
+         }
+
+         if(g_effEnSqueeze)
+         {
+            double minLow5 = low[i - 1];
+            for(int k = i - 5; k <= i - 1; k++)
+               if(low[k] < minLow5) minLow5 = low[k];
+
+            if(recentSqz &&
+               g_sqzOn[i] == 0 &&
+               close[i] < g_kcLower[i] &&
+               close[i] < minLow5 &&
+               g_sqzMom[i] < 0.0 && g_sqzMom[i] < g_sqzMom[i - 1] &&
+               g_rvol[i] >= 1.20 &&
+               clv <= -0.35 &&
+               g_ofi[i] <= -0.25 &&
+               z >= -2.2 &&
+               (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias <= 0))
+            {
+               trigBearSqz = true;
+               bearStructExtreme = (!trigBearSweep)
+                                   ? MathMax(high[i], high[i - 1])
+                                   : MathMax(bearStructExtreme, MathMax(high[i], high[i - 1]));
+            }
+         }
+
+         if(g_effEnPullback)
+         {
+            bool trendSupport = (InpUseHTFFilter && g_resolvedHTF != _Period && htfBias == -1) ||
+                                (ker >= 0.25 && vwapSlope < 0.0 && g_emaFast[i] < g_emaSlow[i]);
+            bool touchedVWAP  = (high[i] >= g_vwapVal[i] - 0.25 * atr) ||
+                                (high[i - 1] >= g_vwapVal[i - 1] - 0.25 * atr);
+            bool heldResist   = (high[i] <= g_vwapVal[i] + 2.2 * g_vwapStd[i]);
+            bool confirmClose = (close[i] < open[i] && close[i] < g_vwapVal[i] && clv <= -0.35 &&
+                                 (close[i] < low[i - 1] || (-bodyOpenClose) >= 0.40 * atr));
+
+            if(trendSupport && touchedVWAP && heldResist && confirmClose &&
+               g_ofi[i] <= -0.20 && g_rvol[i] >= 1.00 && z >= -1.8)
+            {
+               trigBearPull = true;
+               double pullMax = MathMax(high[i], high[i - 1]);
+               bearStructExtreme = (!trigBearSweep && !trigBearSqz)
+                                   ? pullMax
+                                   : MathMax(bearStructExtreme, pullMax);
+            }
+         }
+
+         if(InpSSRNHardRegimeOnV2 && ssrnDir != -1)
+         {
+            trigBearSweep = false;
+            trigBearSqz   = false;
+            trigBearPull  = false;
+         }
+
+         if((trigBullCh || trigBullEma))
+         {
+            double ssExtB = MathMin(low[i], low[i - 1]);
+            bullStructExtreme = (!trigBullSweep && !trigBullSqz && !trigBullPull)
+                                ? ssExtB
+                                : MathMin(bullStructExtreme, ssExtB);
+         }
+         if((trigBearCh || trigBearEma))
+         {
+            double ssExtS = MathMax(high[i], high[i - 1]);
+            bearStructExtreme = (!trigBearSweep && !trigBearSqz && !trigBearPull)
+                                ? ssExtS
+                                : MathMax(bearStructExtreme, ssExtS);
+         }
+
+         //--- Calculate 100-Point Confluence Score (Bullish)
+         int bullScore = 0;
+         int bullPB    = PB_NONE;
+         int bullCount = (trigBullSweep ? 1 : 0) + (trigBullSqz ? 1 : 0) + (trigBullPull ? 1 : 0) +
+                         (trigBullCh ? 1 : 0) + (trigBullEma ? 1 : 0);
+         if(bullCount > 0)
+         {
+            if(bullCount > 1)        bullPB = PB_MULTI;
+            else if(trigBullSweep)   bullPB = PB_SWEEP;
+            else if(trigBullSqz)     bullPB = PB_SQUEEZE;
+            else if(trigBullPull)    bullPB = PB_VWAP_PULL;
+            else if(trigBullCh)      bullPB = PB_CH_BREAK;
+            else                     bullPB = PB_EMA_PULL;
+
+            bullScore += 25;
+
+            if(g_ofi[i] >= 0.35)      bullScore += 10;
+            else if(g_ofi[i] >= 0.15) bullScore += 6;
+
+            if(netDelta3 >= 0.12)     bullScore += 5;
+            else if(netDelta3 > 0.0)  bullScore += 2;
+
+            bool bullCVDDiv = (trigBullSweep && g_swLow[i - 1] > 0.0 && g_cvd[i] > g_swLowCVD[i - 1]);
+            if(bullCVDDiv || bullVSA) bullScore += 5;
+
+            if(g_rvol[i] >= 1.50)      bullScore += 10;
+            else if(g_rvol[i] >= 1.20) bullScore += 7;
+            else if(g_rvol[i] >= 1.00) bullScore += 4;
+            if(bullVSA)                bullScore += 5;
+
+            bool pureSweepB = (trigBullSweep && !trigBullSqz && !trigBullPull && !trigBullCh && !trigBullEma);
+            if(pureSweepB)
+            {
+               if(z <= 0.25)      bullScore += 15;
+               else if(z <= 0.85) bullScore += 10;
+               else               bullScore += 4;
+            }
             else
-               bullStructExtreme = MathMin(bullStructExtreme, MathMin(low[i], low[i - 1]));
+            {
+               if(z >= -0.25 && z <= 1.25) bullScore += 15;
+               else if(z <= 1.85)          bullScore += 10;
+               else                        bullScore += 4;
+            }
+
+            if(!InpUseHTFFilter || g_resolvedHTF == _Period) bullScore += 5;
+            else if(htfBias == 1)                            bullScore += 10;
+            else if(htfBias == 0)                            bullScore += 5;
+
+            if(pureSweepB && ker <= 0.38)                                                bullScore += 5;
+            else if((trigBullSqz || trigBullPull || trigBullCh || trigBullEma) && ker >= 0.28) bullScore += 5;
+            else                                                                         bullScore += 3;
+
+            if(clv >= 0.55)            bullScore += 5;
+            else if(clv >= 0.35)       bullScore += 3;
+            if(close[i] > high[i - 1]) bullScore += 5;
+
+            if(InpEnableFVGDisplacement && bullFvgDisp > 0.5)
+               bullScore += 4;
+
+            // SSRN HTF Regime confluence bonus / counter-trend penalty
+            if(ssrnDir == 1)       bullScore += (ssrnSep >= 0.50 ? 8 : 6);
+            else if(ssrnDir == -1) bullScore -= 4;
+
+            if(InpUseExternalMacroBias)
+            {
+               if(InpMacroHardVeto && g_cachedMacroBias <= -50)
+                  bullScore = 0;
+               else
+                  bullScore += (int)MathRound(0.15 * (double)g_cachedMacroBias);
+            }
+            bullScore = MathMax(0, MathMin(100, bullScore));
          }
-      }
 
-      if(g_effEnPullback)
-      {
-         bool trendSupport = (InpUseHTFFilter && g_resolvedHTF != _Period && htfBias == 1) ||
-                             (ker >= 0.25 && vwapSlope > 0.0 && g_emaFast[i] > g_emaSlow[i]);
-         bool touchedVWAP  = (low[i] <= g_vwapVal[i] + 0.25 * atr) ||
-                             (low[i - 1] <= g_vwapVal[i - 1] + 0.25 * atr);
-         bool heldSupport  = (low[i] >= g_vwapVal[i] - 2.2 * g_vwapStd[i]);
-         bool confirmClose = (close[i] > open[i] && close[i] > g_vwapVal[i] && clv >= 0.35 &&
-                              (close[i] > high[i - 1] || bodyOpenClose >= 0.40 * atr));
-
-         if(trendSupport && touchedVWAP && heldSupport && confirmClose &&
-            g_ofi[i] >= 0.20 && g_rvol[i] >= 1.00 && z <= 1.8)
+         //--- Calculate 100-Point Confluence Score (Bearish)
+         int bearScore = 0;
+         int bearPB    = PB_NONE;
+         int bearCount = (trigBearSweep ? 1 : 0) + (trigBearSqz ? 1 : 0) + (trigBearPull ? 1 : 0) +
+                         (trigBearCh ? 1 : 0) + (trigBearEma ? 1 : 0);
+         if(bearCount > 0)
          {
-            trigBullPull = true;
-            double pullMin = MathMin(low[i], low[i - 1]);
-            if(!trigBullSweep && !trigBullSqz)
-               bullStructExtreme = pullMin;
+            if(bearCount > 1)        bearPB = PB_MULTI;
+            else if(trigBearSweep)   bearPB = PB_SWEEP;
+            else if(trigBearSqz)     bearPB = PB_SQUEEZE;
+            else if(trigBearPull)    bearPB = PB_VWAP_PULL;
+            else if(trigBearCh)      bearPB = PB_CH_BREAK;
+            else                     bearPB = PB_EMA_PULL;
+
+            bearScore += 25;
+
+            if(g_ofi[i] <= -0.35)      bearScore += 10;
+            else if(g_ofi[i] <= -0.15) bearScore += 6;
+
+            if(netDelta3 <= -0.12)     bearScore += 5;
+            else if(netDelta3 < 0.0)   bearScore += 2;
+
+            bool bearCVDDiv = (trigBearSweep && g_swHigh[i - 1] > 0.0 && g_cvd[i] < g_swHighCVD[i - 1]);
+            if(bearCVDDiv || bearVSA)  bearScore += 5;
+
+            if(g_rvol[i] >= 1.50)      bearScore += 10;
+            else if(g_rvol[i] >= 1.20) bearScore += 7;
+            else if(g_rvol[i] >= 1.00) bearScore += 4;
+            if(bearVSA)                bearScore += 5;
+
+            bool pureSweepS = (trigBearSweep && !trigBearSqz && !trigBearPull && !trigBearCh && !trigBearEma);
+            if(pureSweepS)
+            {
+               if(z >= -0.25)      bearScore += 15;
+               else if(z >= -0.85) bearScore += 10;
+               else                bearScore += 4;
+            }
             else
-               bullStructExtreme = MathMin(bullStructExtreme, pullMin);
+            {
+               if(z <= 0.25 && z >= -1.25) bearScore += 15;
+               else if(z >= -1.85)         bearScore += 10;
+               else                        bearScore += 4;
+            }
+
+            if(!InpUseHTFFilter || g_resolvedHTF == _Period) bearScore += 5;
+            else if(htfBias == -1)                           bearScore += 10;
+            else if(htfBias == 0)                            bearScore += 5;
+
+            if(pureSweepS && ker <= 0.38)                                                bearScore += 5;
+            else if((trigBearSqz || trigBearPull || trigBearCh || trigBearEma) && ker >= 0.28) bearScore += 5;
+            else                                                                         bearScore += 3;
+
+            if(clv <= -0.55)          bearScore += 5;
+            else if(clv <= -0.35)     bearScore += 3;
+            if(close[i] < low[i - 1]) bearScore += 5;
+
+            if(InpEnableFVGDisplacement && bearFvgDisp > 0.5)
+               bearScore += 4;
+
+            // SSRN HTF Regime confluence bonus / counter-trend penalty
+            if(ssrnDir == -1)     bearScore += (ssrnSep >= 0.50 ? 8 : 6);
+            else if(ssrnDir == 1) bearScore -= 4;
+
+            if(InpUseExternalMacroBias)
+            {
+               if(InpMacroHardVeto && g_cachedMacroBias >= 50)
+                  bearScore = 0;
+               else
+                  bearScore -= (int)MathRound(0.15 * (double)g_cachedMacroBias);
+            }
+            bearScore = MathMax(0, MathMin(100, bearScore));
          }
-      }
 
-      //--- Check Playbooks (Bearish)
-      bool trigBearSweep = false;
-      bool trigBearSqz   = false;
-      bool trigBearPull  = false;
-      double bearStructExtreme = high[i];
+         bool allowBuy  = allowSideLong  && vwapSideBuyOk  && (InpAllowConsecutiveSameDir || (g_lastSigDir[i - 1] != 1)  || (g_buyReset[i - 1] == 1));
+         bool allowSell = allowSideShort && vwapSideSellOk && (InpAllowConsecutiveSameDir || (g_lastSigDir[i - 1] != -1) || (g_sellReset[i - 1] == 1));
 
-      if(g_effEnSweep && g_swHigh[i - 1] > 0.0 && (i - g_swHighBar[i - 1]) <= 80)
-      {
-         double swH = g_swHigh[i - 1];
-         bool sweptNow  = (high[i] > swH + 0.05 * atr);
-         bool sweptPrev = (high[i - 1] > swH + 0.05 * atr && high[i - 1] < swH + 2.5 * atr);
-         if((sweptNow || sweptPrev) &&
-            close[i] < swH &&
-            (close[i] < open[i] || clv <= -0.45) &&
-            g_ofi[i] <= -0.15 &&
-            z >= -1.2 &&
-            !(htfBias == 1 && ker >= 0.45))
+         bool buyValid  = (bullScore >= minScore && allowBuy);
+         bool sellValid = (bearScore >= minScore && allowSell);
+
+         double bullProb = 0.0;
+         double bearProb = 0.0;
+         if(buyValid && InpUseCloudMLFilter && g_mlLoaded)
          {
-            trigBearSweep = true;
-            bearStructExtreme = sweptPrev ? MathMax(high[i], high[i - 1]) : high[i];
+            bullProb = EvaluateMLWinProb(1, g_ofi[i], netDelta3, g_rvol[i], z, ker, htfBias, clv, g_atrPct[i], bullFvgDisp, g_cachedMacroBias);
+            if(bullProb < g_effMLMinProb)
+               buyValid = false;
          }
-      }
-
-      if(g_effEnSqueeze)
-      {
-         double minLow5 = low[i - 1];
-         for(int k = i - 5; k <= i - 1; k++)
-            if(low[k] < minLow5) minLow5 = low[k];
-
-         if(recentSqz &&
-            g_sqzOn[i] == 0 &&
-            close[i] < g_kcLower[i] &&
-            close[i] < minLow5 &&
-            g_sqzMom[i] < 0.0 && g_sqzMom[i] < g_sqzMom[i - 1] &&
-            g_rvol[i] >= 1.20 &&
-            clv <= -0.35 &&
-            g_ofi[i] <= -0.25 &&
-            z >= -2.2 &&
-            (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias <= 0))
+         if(sellValid && InpUseCloudMLFilter && g_mlLoaded)
          {
-            trigBearSqz = true;
-            if(!trigBearSweep)
-               bearStructExtreme = MathMax(high[i], high[i - 1]);
-            else
-               bearStructExtreme = MathMax(bearStructExtreme, MathMax(high[i], high[i - 1]));
+            bearProb = EvaluateMLWinProb(-1, g_ofi[i], netDelta3, g_rvol[i], z, ker, htfBias, clv, g_atrPct[i], bearFvgDisp, g_cachedMacroBias);
+            if(bearProb < g_effMLMinProb)
+               sellValid = false;
          }
-      }
 
-      if(g_effEnPullback)
-      {
-         bool trendSupport = (InpUseHTFFilter && g_resolvedHTF != _Period && htfBias == -1) ||
-                             (ker >= 0.25 && vwapSlope < 0.0 && g_emaFast[i] < g_emaSlow[i]);
-         bool touchedVWAP  = (high[i] >= g_vwapVal[i] - 0.25 * atr) ||
-                             (high[i - 1] >= g_vwapVal[i - 1] - 0.25 * atr);
-         bool heldResist   = (high[i] <= g_vwapVal[i] + 2.2 * g_vwapStd[i]);
-         bool confirmClose = (close[i] < open[i] && close[i] < g_vwapVal[i] && clv <= -0.35 &&
-                              (close[i] < low[i - 1] || (-bodyOpenClose) >= 0.40 * atr));
-
-         if(trendSupport && touchedVWAP && heldResist && confirmClose &&
-            g_ofi[i] <= -0.20 && g_rvol[i] >= 1.00 && z >= -1.8)
+         if(buyValid && !sellValid)
          {
-            trigBearPull = true;
-            double pullMax = MathMax(high[i], high[i - 1]);
-            if(!trigBearSweep && !trigBearSqz)
-               bearStructExtreme = pullMax;
-            else
-               bearStructExtreme = MathMax(bearStructExtreme, pullMax);
+            finalDir     = 1;
+            finalScore   = bullScore;
+            finalPB      = bullPB;
+            finalProb    = bullProb;
+            finalExtreme = bullStructExtreme;
          }
-      }
-
-      //--- Calculate 100-Point Confluence Score (Bullish)
-      int bullScore = 0;
-      int bullPB    = PB_NONE;
-      int bullCount = (trigBullSweep ? 1 : 0) + (trigBullSqz ? 1 : 0) + (trigBullPull ? 1 : 0);
-      if(bullCount > 0)
-      {
-         if(bullCount > 1)        bullPB = PB_MULTI;
-         else if(trigBullSweep)   bullPB = PB_SWEEP;
-         else if(trigBullSqz)     bullPB = PB_SQUEEZE;
-         else                     bullPB = PB_VWAP_PULL;
-
-         bullScore += 25;
-
-         if(g_ofi[i] >= 0.35)      bullScore += 10;
-         else if(g_ofi[i] >= 0.15) bullScore += 6;
-
-         if(netDelta3 >= 0.12)     bullScore += 5;
-         else if(netDelta3 > 0.0)  bullScore += 2;
-
-         bool bullCVDDiv = (trigBullSweep && g_swLow[i - 1] > 0.0 && g_cvd[i] > g_swLowCVD[i - 1]);
-         if(bullCVDDiv || bullVSA) bullScore += 5;
-
-         if(g_rvol[i] >= 1.50)      bullScore += 10;
-         else if(g_rvol[i] >= 1.20) bullScore += 7;
-         else if(g_rvol[i] >= 1.00) bullScore += 4;
-         if(bullVSA)                bullScore += 5;
-
-         if(trigBullSweep)
+         else if(sellValid && !buyValid)
          {
-            if(z <= 0.25)      bullScore += 15;
-            else if(z <= 0.85) bullScore += 10;
-            else               bullScore += 4;
+            finalDir     = -1;
+            finalScore   = bearScore;
+            finalPB      = bearPB;
+            finalProb    = bearProb;
+            finalExtreme = bearStructExtreme;
          }
-         else
+         else if(buyValid && sellValid)
          {
-            if(z >= -0.25 && z <= 1.25) bullScore += 15;
-            else if(z <= 1.85)          bullScore += 10;
-            else                        bullScore += 4;
+            if(bullScore > bearScore)
+            {
+               finalDir     = 1;
+               finalScore   = bullScore;
+               finalPB      = bullPB;
+               finalProb    = bullProb;
+               finalExtreme = bullStructExtreme;
+            }
+            else if(bearScore > bullScore)
+            {
+               finalDir     = -1;
+               finalScore   = bearScore;
+               finalPB      = bearPB;
+               finalProb    = bearProb;
+               finalExtreme = bearStructExtreme;
+            }
          }
-
-         if(!InpUseHTFFilter || g_resolvedHTF == _Period) bullScore += 5;
-         else if(htfBias == 1)                            bullScore += 10;
-         else if(htfBias == 0)                            bullScore += 5;
-
-         if(trigBullSweep && ker <= 0.38)                     bullScore += 5;
-         else if((trigBullSqz || trigBullPull) && ker >= 0.28) bullScore += 5;
-         else                                                 bullScore += 3;
-
-         if(clv >= 0.55)      bullScore += 5;
-         else if(clv >= 0.35) bullScore += 3;
-         if(close[i] > high[i - 1]) bullScore += 5;
-
-         if(InpEnableFVGDisplacement && bullFvgDisp > 0.5)
-            bullScore += 4;
-
-         if(InpUseExternalMacroBias)
-         {
-            if(InpMacroHardVeto && g_cachedMacroBias <= -50)
-               bullScore = 0;
-            else
-               bullScore += (int)MathRound(0.15 * (double)g_cachedMacroBias);
-         }
-         bullScore = MathMax(0, MathMin(100, bullScore));
-      }
-
-      //--- Calculate 100-Point Confluence Score (Bearish)
-      int bearScore = 0;
-      int bearPB    = PB_NONE;
-      int bearCount = (trigBearSweep ? 1 : 0) + (trigBearSqz ? 1 : 0) + (trigBearPull ? 1 : 0);
-      if(bearCount > 0)
-      {
-         if(bearCount > 1)        bearPB = PB_MULTI;
-         else if(trigBearSweep)   bearPB = PB_SWEEP;
-         else if(trigBearSqz)     bearPB = PB_SQUEEZE;
-         else                     bearPB = PB_VWAP_PULL;
-
-         bearScore += 25;
-
-         if(g_ofi[i] <= -0.35)      bearScore += 10;
-         else if(g_ofi[i] <= -0.15) bearScore += 6;
-
-         if(netDelta3 <= -0.12)     bearScore += 5;
-         else if(netDelta3 < 0.0)   bearScore += 2;
-
-         bool bearCVDDiv = (trigBearSweep && g_swHigh[i - 1] > 0.0 && g_cvd[i] < g_swHighCVD[i - 1]);
-         if(bearCVDDiv || bearVSA)  bearScore += 5;
-
-         if(g_rvol[i] >= 1.50)      bearScore += 10;
-         else if(g_rvol[i] >= 1.20) bearScore += 7;
-         else if(g_rvol[i] >= 1.00) bearScore += 4;
-         if(bearVSA)                bearScore += 5;
-
-         if(trigBearSweep)
-         {
-            if(z >= -0.25)      bearScore += 15;
-            else if(z >= -0.85) bearScore += 10;
-            else                bearScore += 4;
-         }
-         else
-         {
-            if(z <= 0.25 && z >= -1.25) bearScore += 15;
-            else if(z >= -1.85)         bearScore += 10;
-            else                        bearScore += 4;
-         }
-
-         if(!InpUseHTFFilter || g_resolvedHTF == _Period) bearScore += 5;
-         else if(htfBias == -1)                           bearScore += 10;
-         else if(htfBias == 0)                            bearScore += 5;
-
-         if(trigBearSweep && ker <= 0.38)                     bearScore += 5;
-         else if((trigBearSqz || trigBearPull) && ker >= 0.28) bearScore += 5;
-         else                                                 bearScore += 3;
-
-         if(clv <= -0.55)      bearScore += 5;
-         else if(clv <= -0.35) bearScore += 3;
-         if(close[i] < low[i - 1]) bearScore += 5;
-
-         if(InpEnableFVGDisplacement && bearFvgDisp > 0.5)
-            bearScore += 4;
-
-         if(InpUseExternalMacroBias)
-         {
-            if(InpMacroHardVeto && g_cachedMacroBias >= 50)
-               bearScore = 0;
-            else
-               bearScore -= (int)MathRound(0.15 * (double)g_cachedMacroBias);
-         }
-         bearScore = MathMax(0, MathMin(100, bearScore));
-      }
-
-      bool allowBuy  = InpAllowConsecutiveSameDir || (g_lastSigDir[i - 1] != 1)  || (g_buyReset[i - 1] == 1);
-      bool allowSell = InpAllowConsecutiveSameDir || (g_lastSigDir[i - 1] != -1) || (g_sellReset[i - 1] == 1);
-
-      bool buyValid  = (bullScore >= minScore && allowBuy);
-      bool sellValid = (bearScore >= minScore && allowSell);
-
-      double bullProb = 0.0;
-      double bearProb = 0.0;
-      if(buyValid && InpUseCloudMLFilter && g_mlLoaded)
-      {
-         bullProb = EvaluateMLWinProb(1, g_ofi[i], netDelta3, g_rvol[i], z, ker, htfBias, clv, g_atrPct[i], bullFvgDisp, g_cachedMacroBias);
-         if(bullProb < g_effMLMinProb)
-            buyValid = false;
-      }
-      if(sellValid && InpUseCloudMLFilter && g_mlLoaded)
-      {
-         bearProb = EvaluateMLWinProb(-1, g_ofi[i], netDelta3, g_rvol[i], z, ker, htfBias, clv, g_atrPct[i], bearFvgDisp, g_cachedMacroBias);
-         if(bearProb < g_effMLMinProb)
-            sellValid = false;
-      }
-
-      int finalDir = 0;
-      if(buyValid && !sellValid)
-         finalDir = 1;
-      else if(sellValid && !buyValid)
-         finalDir = -1;
-      else if(buyValid && sellValid)
-      {
-         if(bullScore > bearScore)      finalDir = 1;
-         else if(bearScore > bullScore) finalDir = -1;
       }
 
       if(finalDir == 1)
       {
          double entry   = close[i];
-         double rawRisk = MathAbs(entry - (bullStructExtreme - g_effSLBufferATR * atr));
-         double minRisk = InpMinSLATR * atr;
-         double maxRisk = InpMaxSLATR * atr;
-         double risk    = MathMax(minRisk, MathMin(maxRisk, rawRisk));
+         double risk    = 0.0;
+         if(InpSLMode == SL_SSRN_FIXED_ATR || skipStructClamp)
+         {
+            risk = MathMax(_Point * 2.0, InpSSRNStopATR * atr);
+         }
+         else
+         {
+            double rawRisk = MathAbs(entry - (finalExtreme - g_effSLBufferATR * atr));
+            risk = MathMax(InpMinSLATR * atr, MathMin(InpMaxSLATR * atr, rawRisk));
+         }
 
          BuySignalBuffer[i] = low[i] - 0.35 * atr;
-         ScoreBuffer[i]     = (double)bullScore;
-         SLBuffer[i]        = NormalizeDouble(entry - risk, _Digits);
-         TP1Buffer[i]       = NormalizeDouble(entry + g_effTP1Mult * risk, _Digits);
-         TP2Buffer[i]       = NormalizeDouble(entry + g_effTP2Mult * risk, _Digits);
-         MLProbBuffer[i]    = (InpUseCloudMLFilter && g_mlLoaded) ? bullProb : 0.0;
-         g_sigPlaybook[i]   = bullPB;
+         ScoreBuffer[i]     = (double)finalScore;
+         SLBuffer[i]        = TickRound(entry - risk, false);
+         TP1Buffer[i]       = TickRound(entry + g_effTP1Mult * risk, true);
+         TP2Buffer[i]       = TickRound(entry + g_effTP2Mult * risk, true);
+         MLProbBuffer[i]    = (InpMergeMode == MERGE_HYBRID_PRO && InpUseCloudMLFilter && g_mlLoaded) ? finalProb : 0.0;
+         g_sigPlaybook[i]   = finalPB;
 
          g_lastSigBar[i]    = i;
          g_lastSigDir[i]    = 1;
          g_buyReset[i]      = 0;
          g_sellReset[i]     = 1;
+         g_daySigCount[i]   = g_daySigCount[i] + 1;
       }
       else if(finalDir == -1)
       {
          double entry   = close[i];
-         double rawRisk = MathAbs((bearStructExtreme + g_effSLBufferATR * atr) - entry);
-         double minRisk = InpMinSLATR * atr;
-         double maxRisk = InpMaxSLATR * atr;
-         double risk    = MathMax(minRisk, MathMin(maxRisk, rawRisk));
+         double risk    = 0.0;
+         if(InpSLMode == SL_SSRN_FIXED_ATR || skipStructClamp)
+         {
+            risk = MathMax(_Point * 2.0, InpSSRNStopATR * atr);
+         }
+         else
+         {
+            double rawRisk = MathAbs((finalExtreme + g_effSLBufferATR * atr) - entry);
+            risk = MathMax(InpMinSLATR * atr, MathMin(InpMaxSLATR * atr, rawRisk));
+         }
 
          SellSignalBuffer[i] = high[i] + 0.35 * atr;
-         ScoreBuffer[i]      = -(double)bearScore;
-         SLBuffer[i]         = NormalizeDouble(entry + risk, _Digits);
-         TP1Buffer[i]        = NormalizeDouble(entry - g_effTP1Mult * risk, _Digits);
-         TP2Buffer[i]        = NormalizeDouble(entry - g_effTP2Mult * risk, _Digits);
-         MLProbBuffer[i]     = (InpUseCloudMLFilter && g_mlLoaded) ? bearProb : 0.0;
-         g_sigPlaybook[i]    = bearPB;
+         ScoreBuffer[i]      = -(double)finalScore;
+         SLBuffer[i]         = TickRound(entry + risk, true);
+         TP1Buffer[i]        = TickRound(entry - g_effTP1Mult * risk, false);
+         TP2Buffer[i]        = TickRound(entry - g_effTP2Mult * risk, false);
+         MLProbBuffer[i]     = (InpMergeMode == MERGE_HYBRID_PRO && InpUseCloudMLFilter && g_mlLoaded) ? finalProb : 0.0;
+         g_sigPlaybook[i]    = finalPB;
 
          g_lastSigBar[i]     = i;
          g_lastSigDir[i]     = -1;
          g_sellReset[i]      = 0;
          g_buyReset[i]       = 1;
+         g_daySigCount[i]    = g_daySigCount[i] + 1;
       }
    }
 
-   //--- Alert Dispatch (Strictly Once Per Newly Closed Bar, Never on Initial Load)
+   //--- Pass 3: Causal Trade Sim, Trail/Exit Buffers, Sizing Audit & HUD (Before Alerts/CSV)
+   if(fullRecalc || rates_total != g_lastVisualRatesTotal || g_cachedMacroBias != g_lastVisualMacroBias)
+   {
+      SimulateTradesAndVisuals(rates_total, time, high, low, close, volume, spread);
+      g_lastVisualRatesTotal = rates_total;
+      g_lastVisualMacroBias  = g_cachedMacroBias;
+   }
+
+   //--- Alert Dispatch & Optional Decision CSV Log (Strictly Once Per Newly Closed Bar)
    datetime latestClosedTime = time[rates_total - 2];
    if(fullRecalc || g_prevRatesTotal == 0)
    {
-      g_lastAlertBarTime = latestClosedTime;
+      g_lastAlertBarTime    = latestClosedTime;
+      g_lastDecisionCSVTime = latestClosedTime;
    }
-   else if(latestClosedTime > g_lastAlertBarTime)
+   else
    {
-      FireSignalAlerts(rates_total - 2, time, close);
-      g_lastAlertBarTime = latestClosedTime;
-   }
-
-   //--- Update Causal Historical Stats & Dashboard HUD
-   if(fullRecalc || rates_total != g_lastVisualRatesTotal || g_cachedMacroBias != g_lastVisualMacroBias)
-   {
-      UpdateVisualsAndStats(rates_total, time, high, low, close, volume);
-      g_lastVisualRatesTotal = rates_total;
-      g_lastVisualMacroBias  = g_cachedMacroBias;
+      if(latestClosedTime > g_lastAlertBarTime)
+      {
+         FireSignalAlerts(rates_total - 2, time, close);
+         g_lastAlertBarTime = latestClosedTime;
+      }
+      if(latestClosedTime > g_lastDecisionCSVTime)
+      {
+         WriteDecisionCSVRow(rates_total - 2, time, close, spread);
+         g_lastDecisionCSVTime = latestClosedTime;
+      }
    }
 
    g_prevRatesTotal = rates_total;
