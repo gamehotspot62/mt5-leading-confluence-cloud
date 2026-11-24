@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-24T22:54:29Z",
+  "updated_utc": "2026-11-24T23:46:41Z",
   "global_bias": -9,
   "global_regime": {
     "vix": 26.36,
@@ -13,15 +13,15 @@
     "yield_curve_10y2y": 0.28,
     "fed_net_liq_trillion": 5.825,
     "fed_net_liq_4w_pct": 0.4,
-    "dxy": 103.82,
-    "dxy_ret20_pct": 1.47,
+    "dxy": 103.85,
+    "dxy_ret20_pct": 1.49,
     "breadth_rsp_spy_20d_pct": 5.33,
     "credit_hyg_tlt_20d_pct": -1.34,
     "tech_qqq_xlp_20d_pct": -16.08,
     "stablecoins": {
-      "total_usd_b": 283.22,
-      "chg_7d_pct": -1.13,
-      "chg_30d_pct": -5.74
+      "total_usd_b": 283.24,
+      "chg_7d_pct": -1.12,
+      "chg_30d_pct": -5.73
     },
     "fear_greed": {
       "value": 11.0,
@@ -71,7 +71,7 @@
         {
           "ticker": "IBIT",
           "ok": true,
-          "cmf10": -0.349,
+          "cmf10": -0.348,
           "ret10_pct": -19.0,
           "score": -25.0
         },
@@ -91,7 +91,7 @@
         "netflow7_ratio": -0.0316,
         "netflow_pts": 5.7,
         "ex_supply_30d_pct": 0.84,
-        "stablecoins_30d_pct": -5.74,
+        "stablecoins_30d_pct": -5.73,
         "funding_8h": 1e-06,
         "funding_pts": -0.0,
         "fear_greed": 11.0
@@ -121,7 +121,7 @@
         "netflow7_ratio": 0.0708,
         "netflow_pts": -12.8,
         "ex_supply_30d_pct": -3.42,
-        "stablecoins_30d_pct": -5.74,
+        "stablecoins_30d_pct": -5.73,
         "funding_8h": 0.0,
         "funding_pts": -0.0,
         "fear_greed": 11.0
@@ -204,7 +204,7 @@
     },
     "GBPUSD": {
       "asset_class": "fx",
-      "bias_score": -15,
+      "bias_score": -16,
       "note": "COT22_ETF-23_VIXBack",
       "cot": {
         "ok": true,
