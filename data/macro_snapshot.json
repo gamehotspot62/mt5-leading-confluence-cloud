@@ -1,10 +1,10 @@
 {
-  "updated_utc": "2026-11-24T09:50:38Z",
-  "global_bias": -10,
+  "updated_utc": "2026-11-24T10:54:16Z",
+  "global_bias": -17,
   "global_regime": {
-    "vix": 27.44,
+    "vix": 27.98,
     "vix3m": 25.5,
-    "vix_vix3m_ratio": 1.076,
+    "vix_vix3m_ratio": 1.097,
     "vix_state": "BACKWARDATION_RISK_OFF",
     "hy_oas_pct": 3.76,
     "hy_oas_chg20": 0.38,
@@ -13,8 +13,8 @@
     "yield_curve_10y2y": 0.29,
     "fed_net_liq_trillion": 5.824,
     "fed_net_liq_4w_pct": 0.4,
-    "dxy": 104.25,
-    "dxy_ret20_pct": 1.89,
+    "dxy": 104.14,
+    "dxy_ret20_pct": 1.78,
     "breadth_rsp_spy_20d_pct": 3.78,
     "credit_hyg_tlt_20d_pct": -0.89,
     "tech_qqq_xlp_20d_pct": -11.04,
@@ -31,7 +31,7 @@
   "symbols": {
     "XAUUSD": {
       "asset_class": "metals",
-      "bias_score": -26,
+      "bias_score": -25,
       "note": "COT100_ETF-25_VIXBack",
       "cot": {
         "ok": true,
@@ -56,7 +56,7 @@
     },
     "BTCUSD": {
       "asset_class": "crypto",
-      "bias_score": -26,
+      "bias_score": -28,
       "note": "MVRV_Healthy_ExOutflow_ExtremeFearContrarian_COT3",
       "cot": {
         "ok": true,
@@ -99,7 +99,7 @@
     },
     "ETHUSD": {
       "asset_class": "crypto",
-      "bias_score": -8,
+      "bias_score": -11,
       "note": "MVRV_Value_ExInflow_ExtremeFearContrarian_ETF-23",
       "cot": {
         "ok": false
@@ -122,8 +122,8 @@
         "netflow_pts": -12.8,
         "ex_supply_30d_pct": -3.42,
         "stablecoins_30d_pct": -5.73,
-        "funding_8h": -1.3e-05,
-        "funding_pts": 0.3,
+        "funding_8h": -1e-05,
+        "funding_pts": 0.2,
         "fear_greed": 11.0
       }
     },
@@ -154,7 +154,7 @@
     },
     "USOIL": {
       "asset_class": "energy",
-      "bias_score": -12,
+      "bias_score": -19,
       "note": "COT99_ETF-11_VIXBack",
       "cot": {
         "ok": true,
@@ -179,7 +179,7 @@
     },
     "EURUSD": {
       "asset_class": "fx",
-      "bias_score": -20,
+      "bias_score": -22,
       "note": "COT1_ETF-25_VIXBack",
       "cot": {
         "ok": true,
@@ -204,7 +204,7 @@
     },
     "GBPUSD": {
       "asset_class": "fx",
-      "bias_score": -18,
+      "bias_score": -20,
       "note": "COT22_ETF-25_VIXBack",
       "cot": {
         "ok": true,
@@ -229,7 +229,7 @@
     },
     "USDJPY": {
       "asset_class": "fx",
-      "bias_score": 0,
+      "bias_score": -7,
       "note": "COT88_ETF-1_VIXBack",
       "cot": {
         "ok": true,
@@ -254,7 +254,7 @@
     },
     "US500": {
       "asset_class": "index",
-      "bias_score": -30,
+      "bias_score": -41,
       "note": "COT26_ETF-20_VIXBack",
       "cot": {
         "ok": true,
@@ -286,7 +286,7 @@
     },
     "US100": {
       "asset_class": "index",
-      "bias_score": -25,
+      "bias_score": -36,
       "note": "COT77_ETF-19_VIXBack",
       "cot": {
         "ok": true,
