@@ -7,8 +7,8 @@
 //+------------------------------------------------------------------+
 #property copyright "LeadingConfluencePro Quantitative Architecture"
 #property link      "https://github.com/gamehotspot62/mt5-leading-confluence-cloud"
-#property version   "2.10"
-#property description "Universal non-repainting leading confluence indicator v2.10 (Merged SSRN 1.10):"
+#property version   "2.11"
+#property description "Universal non-repainting leading confluence indicator v2.11 (Merged SSRN 1.10):"
 #property description "1) BVC + CLV Order Flow Delta & CVD Divergence (microstructure)"
 #property description "2) Wyckoff Liquidity Sweep / SFP, Squeeze Breakout & VWAP Pullback"
 #property description "3) SSRN Causal HTF EMA50/200 Regime, Channel Breakout & EMA Pullback"
@@ -193,6 +193,7 @@ input bool            InpEnablePush               = false;         // Mobile Pus
 input bool            InpEnableEmail              = false;         // Email Notification
 input bool            InpEnableSound              = false;         // Play Sound Alert
 input string          InpSoundFile                = "alert2.wav";  // Sound File Name
+input bool            InpQueueBridgeTelegram      = true;          // Queue Alerts to LCP_TelegramOutbox.txt for CloudBridge Relay
 
 input group "=== 7. SSRN Hybrid Mode, HTF Regime & Playbooks ==="
 input ENUM_MERGE_MODE       InpMergeMode           = MERGE_HYBRID_PRO;          // Engine Mode (Hybrid Pro / Pure SSRN / Baseline)
@@ -1797,6 +1798,29 @@ void WriteDecisionCSVRow(const int barIdx,
 }
 
 //+------------------------------------------------------------------+
+//| Helper: Enqueue Closed-Bar Alert to CloudBridge Telegram Outbox  |
+//+------------------------------------------------------------------+
+void EnqueueBridgeTelegram(const string rawMsg)
+{
+   if(!InpQueueBridgeTelegram || StringLen(rawMsg) == 0)
+      return;
+
+   string cleanMsg = rawMsg;
+   StringReplace(cleanMsg, "\r", " ");
+   StringReplace(cleanMsg, "\n", " ");
+   StringReplace(cleanMsg, "\t", " ");
+
+   int commonFlag = InpUseCommonFiles ? FILE_COMMON : 0;
+   int fh = FileOpen("LCP_TelegramOutbox.txt", FILE_READ | FILE_WRITE | FILE_TXT | FILE_ANSI | commonFlag);
+   if(fh != INVALID_HANDLE)
+   {
+      FileSeek(fh, 0, SEEK_END);
+      FileWriteString(fh, cleanMsg + "\r\n");
+      FileClose(fh);
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Helper: Fire Once-Per-Closed-Bar Signal & Exit Alerts            |
 //+------------------------------------------------------------------+
 void FireSignalAlerts(const int barIdx,
@@ -1813,7 +1837,7 @@ void FireSignalAlerts(const int barIdx,
       string mlStr    = (MLProbBuffer[barIdx] > 0.0) ? StringFormat(" | ML: %.0f%%", MLProbBuffer[barIdx] * 100.0) : "";
       string lotStr   = g_liveSizing.valid ? StringFormat(" | Lots: %.2f", g_liveSizing.lots) : "";
 
-      string msg = StringFormat("LeadingConfluencePro v2.10 [%s %s] CONFIRMED %s (%s) | Score: %d/100%s%s | Entry: %s | SL: %s | TP1: %s | TP2: %s | Bar: %s",
+      string msg = StringFormat("LeadingConfluencePro v2.11 [%s %s] CONFIRMED %s (%s) | Score: %d/100%s%s | Entry: %s | SL: %s | TP1: %s | TP2: %s | Bar: %s",
                                 _Symbol,
                                 EnumToString(_Period),
                                 dirStr,
@@ -1829,13 +1853,14 @@ void FireSignalAlerts(const int barIdx,
 
       if(InpEnableAlert) Alert(msg);
       if(InpEnablePush)  SendNotification(msg);
-      if(InpEnableEmail) SendMail(StringFormat("LCPv2.10 %s %s %s (%d)", _Symbol, EnumToString(_Period), dirStr, scoreVal), msg);
+      if(InpEnableEmail) SendMail(StringFormat("LCPv2.11 %s %s %s (%d)", _Symbol, EnumToString(_Period), dirStr, scoreVal), msg);
       if(InpEnableSound && StringLen(InpSoundFile) > 0) PlaySound(InpSoundFile);
+      EnqueueBridgeTelegram(msg);
    }
 
    if(InpAlertOnExit && g_exitReason[barIdx] != EXIT_NONE)
    {
-      string emsg = StringFormat("LeadingConfluencePro v2.10 [%s %s] SIMULATED EXIT (%s) @ %s | Bar: %s",
+      string emsg = StringFormat("LeadingConfluencePro v2.11 [%s %s] SIMULATED EXIT (%s) @ %s | Bar: %s",
                                  _Symbol,
                                  EnumToString(_Period),
                                  ExitReasonName(g_exitReason[barIdx]),
@@ -1843,7 +1868,8 @@ void FireSignalAlerts(const int barIdx,
                                  TimeToString(time[barIdx], TIME_DATE | TIME_MINUTES));
       if(InpEnableAlert) Alert(emsg);
       if(InpEnablePush)  SendNotification(emsg);
-      if(InpEnableEmail) SendMail(StringFormat("LCPv2.10 EXIT %s %s (%s)", _Symbol, EnumToString(_Period), ExitReasonName(g_exitReason[barIdx])), emsg);
+      if(InpEnableEmail) SendMail(StringFormat("LCPv2.11 EXIT %s %s (%s)", _Symbol, EnumToString(_Period), ExitReasonName(g_exitReason[barIdx])), emsg);
+      EnqueueBridgeTelegram(emsg);
    }
 }
 

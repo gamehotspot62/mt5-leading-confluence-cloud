@@ -44,14 +44,51 @@ class EngineParams:
     tp1_mult: float = 1.5
     tp2_mult: float = 2.5
     macro_hard_veto: bool = False
+    # SSRN v2.10 Hybrid Pro extensions
+    en_ssrn_breakout: bool = True
+    en_ssrn_pullback: bool = True
+    ssrn_trend_fast: int = 50
+    ssrn_trend_slow: int = 200
+    ssrn_slope_bars: int = 3
+    ssrn_min_sep_atr: float = 0.10
+    ssrn_entry_ema: int = 20
+    ssrn_breakout_bars: int = 20
+    ssrn_breakout_buf_atr: float = 0.05
+    ssrn_pullback_bars: int = 3
+    ssrn_pullback_tol_atr: float = 0.20
+    ssrn_max_signal_range_atr: float = 3.50
+    ssrn_max_extension_atr: float = 3.00
+    ssrn_max_open_gap_atr: float = 0.50
+    ssrn_hard_regime_on_v2: bool = False
+    use_ssrn_hygiene: bool = True
+
+
+def _tf_seconds(tf: str) -> int:
+    return (
+        300 if tf == "5m" else (900 if tf == "15m" else (3600 if tf == "1h" else (4 * 3600 if tf == "4h" else 86400)))
+    )
+
+
+def _htf_seconds_for(base_tf: str) -> int:
+    if base_tf == "5m":
+        return 1800
+    if base_tf == "15m":
+        return 3600
+    if base_tf == "1h":
+        return 4 * 3600
+    if base_tf == "4h":
+        return 86400
+    return 7 * 86400
 
 
 def resample_htf(df: pd.DataFrame, tf: str) -> Tuple[pd.DataFrame, int]:
     """
-    Resample base OHLCV ('15m' -> '1h', '1h' -> '4h', '4h' -> '1D', or '1d' -> '1W')
+    Resample base OHLCV ('5m' -> '30min', '15m' -> '1h', '1h' -> '4h', '4h' -> '1D', or '1d' -> '1W')
     and return (htf_df, htf_seconds).
     """
-    if tf == "15m":
+    if tf == "5m":
+        rule, htf_sec = "30min", 1800
+    elif tf == "15m":
         rule, htf_sec = "1h", 3600
     elif tf == "1h":
         rule, htf_sec = "4h", 4 * 3600
@@ -70,7 +107,9 @@ def resample_htf(df: pd.DataFrame, tf: str) -> Tuple[pd.DataFrame, int]:
 
 
 def compute_causal_htf_bias(
-    df: pd.DataFrame, base_tf: str = "1h"
+    df: pd.DataFrame,
+    base_tf: str = "1h",
+    htf_df_override: Optional[pd.DataFrame] = None,
 ) -> np.ndarray:
     """
     Compute higher-timeframe bias (+1, 0, -1) aligned strictly on completed HTF close timestamps.
@@ -80,11 +119,15 @@ def compute_causal_htf_bias(
     if n < 30:
         return out
 
-    htf_df, htf_sec = resample_htf(df, base_tf)
+    if htf_df_override is not None and not htf_df_override.empty:
+        htf_df = htf_df_override.reset_index(drop=True)
+        htf_sec = _htf_seconds_for(base_tf)
+    else:
+        htf_df, htf_sec = resample_htf(df, base_tf)
     if len(htf_df) < 10:
         return out
 
-    bar_sec = 900 if base_tf == "15m" else (3600 if base_tf == "1h" else (4 * 3600 if base_tf == "4h" else 86400))
+    bar_sec = _tf_seconds(base_tf)
     hc = htf_df["close"].values.astype(float)
     hh = htf_df["high"].values.astype(float)
     hl = htf_df["low"].values.astype(float)
@@ -125,6 +168,89 @@ def compute_causal_htf_bias(
     return out
 
 
+def compute_causal_ssrn_regime(
+    df: pd.DataFrame,
+    base_tf: str,
+    params: EngineParams,
+    htf_df_override: Optional[pd.DataFrame] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Exact causal mirror of LeadingConfluencePro.mq5 v2.10 ComputeCausalSSRNRegime:
+    HTF EMA(50) / EMA(200) + slope_bars + CoreDirection separation filter.
+    """
+    n = len(df)
+    out_dir = np.zeros(n, dtype=np.int32)
+    out_sep = np.zeros(n, dtype=float)
+    if n < 30:
+        return out_dir, out_sep
+
+    if htf_df_override is not None and not htf_df_override.empty:
+        htf_df = htf_df_override.reset_index(drop=True)
+        htf_sec = _htf_seconds_for(base_tf)
+    else:
+        htf_df, htf_sec = resample_htf(df, base_tf)
+
+    slope_bars = max(1, params.ssrn_slope_bars)
+    m = len(htf_df)
+    if m <= slope_bars + 2:
+        return out_dir, out_sep
+
+    slow_p = max(3, params.ssrn_trend_slow)
+    fast_p = max(2, min(params.ssrn_trend_fast, slow_p - 1))
+    atr_p = max(2, params.atr_period)
+    warmup_h = min(m - 1, max(atr_p, min(slow_p // 4, 20)))
+
+    hc = htf_df["close"].values.astype(float)
+    hh = htf_df["high"].values.astype(float)
+    hl = htf_df["low"].values.astype(float)
+    htf_times = htf_df["time"].astype("int64").values // 10**9
+
+    a_fast = 2.0 / (fast_p + 1.0)
+    a_slow = 2.0 / (slow_p + 1.0)
+    htf_fast = np.zeros(m, dtype=float)
+    htf_reg = np.zeros(m, dtype=np.int32)
+    htf_sep = np.zeros(m, dtype=float)
+    htf_close_ts = np.zeros(m, dtype=np.int64)
+
+    ema_f = hc[0]
+    ema_s = hc[0]
+    atr_h = hh[0] - hl[0]
+
+    for h in range(m):
+        if h > 0:
+            ema_f = a_fast * hc[h] + (1.0 - a_fast) * ema_f
+            ema_s = a_slow * hc[h] + (1.0 - a_slow) * ema_s
+            tr = max(hh[h] - hl[h], abs(hh[h] - hc[h - 1]), abs(hl[h] - hc[h - 1]))
+            if h < atr_p:
+                atr_h = (atr_h * h + tr) / (h + 1)
+            else:
+                atr_h = (atr_h * (atr_p - 1) + tr) / atr_p
+        htf_fast[h] = ema_f
+        htf_close_ts[h] = htf_times[h] + htf_sec
+
+        if h >= slope_bars and atr_h > 1e-12:
+            sep = abs(ema_f - ema_s) / atr_h
+            htf_sep[h] = sep
+            if h >= warmup_h and sep >= params.ssrn_min_sep_atr:
+                fast_old = htf_fast[h - slope_bars]
+                if ema_f > ema_s and ema_f > fast_old and hc[h] > ema_s:
+                    htf_reg[h] = 1
+                elif ema_f < ema_s and ema_f < fast_old and hc[h] < ema_s:
+                    htf_reg[h] = -1
+
+    bar_sec = _tf_seconds(base_tf)
+    base_times = (df["time"].astype("int64").values // 10**9) + bar_sec
+    h_ptr = 0
+    for i in range(n):
+        bt = base_times[i]
+        while h_ptr + 1 < m and htf_close_ts[h_ptr + 1] <= bt:
+            h_ptr += 1
+        if htf_close_ts[h_ptr] <= bt:
+            out_dir[i] = htf_reg[h_ptr]
+            out_sep[i] = htf_sep[h_ptr]
+    return out_dir, out_sep
+
+
 def compute_indicators_and_candidates(
     df: pd.DataFrame,
     params: EngineParams,
@@ -132,12 +258,11 @@ def compute_indicators_and_candidates(
     macro_bias_arr: Optional[np.ndarray] = None,
     use_macro_score: bool = False,
     include_last_bar: bool = False,
+    htf_df_override: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Any]:
     """
-    Compute all LeadingConfluencePro v2.00 continuous state arrays AND closed-bar
+    Compute all LeadingConfluencePro v2.10 continuous state arrays AND closed-bar
     candidate signals + 10 standardized ML features.
-    Note: Candidate generation skips duplicate cooldown gating ONLY IF requested; here
-    it mirrors MQL5 strictly on bars [warmup .. N-2].
     """
     n = len(df)
     o = df["open"].values.astype(float)
@@ -152,13 +277,21 @@ def compute_indicators_and_candidates(
     else:
         macro_arr = np.asarray(macro_bias_arr, dtype=float)
 
-    htf_bias = compute_causal_htf_bias(df, base_tf) if params.use_htf else np.zeros(n, dtype=np.int32)
+    htf_bias = (
+        compute_causal_htf_bias(df, base_tf, htf_df_override=htf_df_override)
+        if params.use_htf
+        else np.zeros(n, dtype=np.int32)
+    )
+    ssrn_regime, ssrn_sep_atr = compute_causal_ssrn_regime(
+        df, base_tf, params, htf_df_override=htf_df_override
+    )
 
     atr = np.zeros(n, dtype=float)
     atr_pct = np.full(n, 50.0, dtype=float)
     rvol = np.ones(n, dtype=float)
     ema_fast = np.zeros(n, dtype=float)
     ema_slow = np.zeros(n, dtype=float)
+    entry_ema = np.zeros(n, dtype=float)
     ofi = np.zeros(n, dtype=float)
     delta = np.zeros(n, dtype=float)
     cvd = np.zeros(n, dtype=float)
@@ -182,6 +315,7 @@ def compute_indicators_and_candidates(
 
     alpha_fast = 2.0 / (max(2, params.sqz_period) + 1.0)
     alpha_slow = 2.0 / 51.0
+    alpha_entry = 2.0 / (max(2, params.ssrn_entry_ema) + 1.0)
 
     for i in range(n):
         if i > 0:
@@ -206,9 +340,11 @@ def compute_indicators_and_candidates(
         if i == 0:
             ema_fast[i] = c[i]
             ema_slow[i] = c[i]
+            entry_ema[i] = c[i]
         else:
             ema_fast[i] = alpha_fast * c[i] + (1.0 - alpha_fast) * ema_fast[i - 1]
             ema_slow[i] = alpha_slow * c[i] + (1.0 - alpha_slow) * ema_slow[i - 1]
+            entry_ema[i] = alpha_entry * c[i] + (1.0 - alpha_entry) * entry_ema[i - 1]
 
         bvc_net = 0.0
         if i > 1:
@@ -296,9 +432,10 @@ def compute_indicators_and_candidates(
                     sw_low_bar[i] = p
                     sw_low_cvd[i] = cvd[p]
 
-    # Signal evaluation across closed bars [warmup .. n - 2]
+    # Signal evaluation across closed bars [warmup .. n - 2] (or n - 1 when trimmed & include_last_bar=True)
+    ssrn_lb = max(params.ssrn_breakout_bars + 2, params.ssrn_pullback_bars + 2, params.ssrn_entry_ema)
     warmup = max(
-        params.vwap_period, params.sqz_period, params.vol_period, params.atr_period, params.ker_period
+        params.vwap_period, params.sqz_period, params.vol_period, params.atr_period, params.ker_period, ssrn_lb
     ) + params.pivot_left + params.pivot_right + 10
     warmup = max(65, warmup)
 
@@ -319,8 +456,23 @@ def compute_indicators_and_candidates(
             continue
 
         at = atr[i]
+        prev_at = atr[i - 1]
         rng = h[i] - l[i]
-        if at <= 1e-10 or rng < 0.25 * at:
+        if at <= 1e-10 or prev_at <= 1e-10:
+            continue
+
+        if (i - last_sig_bar) < params.cooldown_bars:
+            continue
+
+        if params.use_ssrn_hygiene:
+            if params.ssrn_max_signal_range_atr > 0.0 and rng > params.ssrn_max_signal_range_atr * prev_at:
+                continue
+            if params.ssrn_max_open_gap_atr > 0.0 and (i + 1) < n and abs(o[i + 1] - c[i]) > params.ssrn_max_open_gap_atr * at:
+                continue
+            if params.ssrn_max_extension_atr > 0.0 and abs(c[i] - entry_ema[i]) > params.ssrn_max_extension_atr * at:
+                continue
+
+        if rng < 0.25 * at:
             continue
 
         recent_sqz = (
@@ -329,9 +481,6 @@ def compute_indicators_and_candidates(
             or sqz_count[i - 3] >= params.min_sqz_bars
         )
         if atr_pct[i] < 8.0 and not recent_sqz:
-            continue
-
-        if (i - last_sig_bar) < params.cooldown_bars:
             continue
 
         clv_i = (((c[i] - l[i]) - (h[i] - c[i])) / rng) if rng > 1e-12 else 0.0
@@ -354,8 +503,39 @@ def compute_indicators_and_candidates(
         vwap_slope = vwap_val[i] - vwap_val[i - 3]
         ker = ker_smooth[i]
         htf_b = int(htf_bias[i])
+        ssrn_dir = int(ssrn_regime[i])
+        ssrn_sep = float(ssrn_sep_atr[i])
         z = vwap_z[i]
         mb = float(macro_arr[i])
+
+        # Shared SSRN Channel Breakout & EMA Pullback triggers
+        trig_b_ch = False
+        trig_s_ch = False
+        trig_b_em = False
+        trig_s_em = False
+        if ssrn_dir != 0:
+            ch_beg = max(0, i - max(2, params.ssrn_breakout_bars))
+            ch_high = float(np.max(h[ch_beg:i]))
+            ch_low = float(np.min(l[ch_beg:i]))
+            if params.en_ssrn_breakout:
+                if ssrn_dir == 1 and c[i] > ch_high + params.ssrn_breakout_buf_atr * prev_at:
+                    trig_b_ch = True
+                elif ssrn_dir == -1 and c[i] < ch_low - params.ssrn_breakout_buf_atr * prev_at:
+                    trig_s_ch = True
+            if params.en_ssrn_pullback:
+                pb_beg = max(0, i - max(1, params.ssrn_pullback_bars) + 1)
+                band = params.ssrn_pullback_tol_atr * prev_at
+                touched_ema = bool(
+                    np.any(
+                        (l[pb_beg : i + 1] <= entry_ema[pb_beg : i + 1] + band)
+                        & (h[pb_beg : i + 1] >= entry_ema[pb_beg : i + 1] - band)
+                    )
+                )
+                if touched_ema:
+                    if ssrn_dir == 1 and c[i] > entry_ema[i] and c[i] > o[i]:
+                        trig_b_em = True
+                    elif ssrn_dir == -1 and c[i] < entry_ema[i] and c[i] < o[i]:
+                        trig_s_em = True
 
         # Bullish Playbooks
         trig_b_sw = False
@@ -410,6 +590,11 @@ def compute_indicators_and_candidates(
                 p_min = min(l[i], l[i - 1])
                 b_ext = p_min if (not trig_b_sw and not trig_b_sq) else min(b_ext, p_min)
 
+        if params.ssrn_hard_regime_on_v2 and ssrn_dir != 1:
+            trig_b_sw = False
+            trig_b_sq = False
+            trig_b_pl = False
+
         # Bearish Playbooks
         trig_s_sw = False
         trig_s_sq = False
@@ -463,12 +648,35 @@ def compute_indicators_and_candidates(
                 p_max = max(h[i], h[i - 1])
                 s_ext = p_max if (not trig_s_sw and not trig_s_sq) else max(s_ext, p_max)
 
+        if params.ssrn_hard_regime_on_v2 and ssrn_dir != -1:
+            trig_s_sw = False
+            trig_s_sq = False
+            trig_s_pl = False
+
+        if trig_b_ch or trig_b_em:
+            ss_ext_b = min(l[i], l[i - 1])
+            b_ext = ss_ext_b if (not trig_b_sw and not trig_b_sq and not trig_b_pl) else min(b_ext, ss_ext_b)
+        if trig_s_ch or trig_s_em:
+            ss_ext_s = max(h[i], h[i - 1])
+            s_ext = ss_ext_s if (not trig_s_sw and not trig_s_sq and not trig_s_pl) else max(s_ext, ss_ext_s)
+
         # Bull Score
         b_score = 0
         b_pb = "None"
-        b_cnt = int(trig_b_sw) + int(trig_b_sq) + int(trig_b_pl)
+        b_cnt = int(trig_b_sw) + int(trig_b_sq) + int(trig_b_pl) + int(trig_b_ch) + int(trig_b_em)
         if b_cnt > 0:
-            b_pb = "MultiConf" if b_cnt > 1 else ("Sweep/SFP" if trig_b_sw else ("SqzBreak" if trig_b_sq else "VWAPPull"))
+            if b_cnt > 1:
+                b_pb = "MultiConf"
+            elif trig_b_sw:
+                b_pb = "Sweep/SFP"
+            elif trig_b_sq:
+                b_pb = "SqzBreak"
+            elif trig_b_pl:
+                b_pb = "VWAPPull"
+            elif trig_b_ch:
+                b_pb = "ChBreak"
+            else:
+                b_pb = "EMAPull"
             b_score += 25
             b_score += 10 if ofi[i] >= 0.35 else (6 if ofi[i] >= 0.15 else 0)
             b_score += 5 if net_delta3 >= 0.12 else (2 if net_delta3 > 0.0 else 0)
@@ -478,7 +686,8 @@ def compute_indicators_and_candidates(
             b_score += 10 if rvol[i] >= 1.50 else (7 if rvol[i] >= 1.20 else (4 if rvol[i] >= 1.00 else 0))
             if bull_vsa:
                 b_score += 5
-            if trig_b_sw:
+            pure_sweep_b = trig_b_sw and not (trig_b_sq or trig_b_pl or trig_b_ch or trig_b_em)
+            if pure_sweep_b:
                 b_score += 15 if z <= 0.25 else (10 if z <= 0.85 else 4)
             else:
                 b_score += 15 if (-0.25 <= z <= 1.25) else (10 if z <= 1.85 else 4)
@@ -488,9 +697,9 @@ def compute_indicators_and_candidates(
                 b_score += 10
             elif htf_b == 0:
                 b_score += 5
-            if trig_b_sw and ker <= 0.38:
+            if pure_sweep_b and ker <= 0.38:
                 b_score += 5
-            elif (trig_b_sq or trig_b_pl) and ker >= 0.28:
+            elif (trig_b_sq or trig_b_pl or trig_b_ch or trig_b_em) and ker >= 0.28:
                 b_score += 5
             else:
                 b_score += 3
@@ -499,6 +708,10 @@ def compute_indicators_and_candidates(
                 b_score += 5
             if params.en_fvg_disp and bull_fvg_disp > 0.5:
                 b_score += 4
+            if ssrn_dir == 1:
+                b_score += (8 if ssrn_sep >= 0.50 else 6)
+            elif ssrn_dir == -1:
+                b_score -= 4
             if use_macro_score:
                 if params.macro_hard_veto and mb <= -50.0:
                     b_score = 0
@@ -509,9 +722,20 @@ def compute_indicators_and_candidates(
         # Bear Score
         s_score = 0
         s_pb = "None"
-        s_cnt = int(trig_s_sw) + int(trig_s_sq) + int(trig_s_pl)
+        s_cnt = int(trig_s_sw) + int(trig_s_sq) + int(trig_s_pl) + int(trig_s_ch) + int(trig_s_em)
         if s_cnt > 0:
-            s_pb = "MultiConf" if s_cnt > 1 else ("Sweep/SFP" if trig_s_sw else ("SqzBreak" if trig_s_sq else "VWAPPull"))
+            if s_cnt > 1:
+                s_pb = "MultiConf"
+            elif trig_s_sw:
+                s_pb = "Sweep/SFP"
+            elif trig_s_sq:
+                s_pb = "SqzBreak"
+            elif trig_s_pl:
+                s_pb = "VWAPPull"
+            elif trig_s_ch:
+                s_pb = "ChBreak"
+            else:
+                s_pb = "EMAPull"
             s_score += 25
             s_score += 10 if ofi[i] <= -0.35 else (6 if ofi[i] <= -0.15 else 0)
             s_score += 5 if net_delta3 <= -0.12 else (2 if net_delta3 < 0.0 else 0)
@@ -521,7 +745,8 @@ def compute_indicators_and_candidates(
             s_score += 10 if rvol[i] >= 1.50 else (7 if rvol[i] >= 1.20 else (4 if rvol[i] >= 1.00 else 0))
             if bear_vsa:
                 s_score += 5
-            if trig_s_sw:
+            pure_sweep_s = trig_s_sw and not (trig_s_sq or trig_s_pl or trig_s_ch or trig_s_em)
+            if pure_sweep_s:
                 s_score += 15 if z >= -0.25 else (10 if z >= -0.85 else 4)
             else:
                 s_score += 15 if (-1.25 <= z <= 0.25) else (10 if z >= -1.85 else 4)
@@ -531,9 +756,9 @@ def compute_indicators_and_candidates(
                 s_score += 10
             elif htf_b == 0:
                 s_score += 5
-            if trig_s_sw and ker <= 0.38:
+            if pure_sweep_s and ker <= 0.38:
                 s_score += 5
-            elif (trig_s_sq or trig_s_pl) and ker >= 0.28:
+            elif (trig_s_sq or trig_s_pl or trig_s_ch or trig_s_em) and ker >= 0.28:
                 s_score += 5
             else:
                 s_score += 3
@@ -542,6 +767,10 @@ def compute_indicators_and_candidates(
                 s_score += 5
             if params.en_fvg_disp and bear_fvg_disp > 0.5:
                 s_score += 4
+            if ssrn_dir == -1:
+                s_score += (8 if ssrn_sep >= 0.50 else 6)
+            elif ssrn_dir == 1:
+                s_score -= 4
             if use_macro_score:
                 if params.macro_hard_veto and mb >= 50.0:
                     s_score = 0
@@ -590,7 +819,7 @@ def compute_indicators_and_candidates(
             last_sig_bar = i
             last_sig_dir = final_dir
 
-            # Exact 10 directional ML features matching LeadingConfluencePro.mq5 v2.00
+            # Exact 10 directional ML features matching LeadingConfluencePro.mq5 v2.10
             feat = [
                 float(final_dir * ofi[i]),
                 float(final_dir * net_delta3),
@@ -614,6 +843,8 @@ def compute_indicators_and_candidates(
                     "sl": sl,
                     "tp1": tp1,
                     "tp2": tp2,
+                    "ssrn_regime": ssrn_dir,
+                    "ssrn_sep_atr": round(ssrn_sep, 2),
                     "features": feat,
                 }
             )
@@ -627,6 +858,9 @@ def compute_indicators_and_candidates(
             "vwap": vwap_val,
             "ker": ker_smooth,
             "htf_bias": htf_bias,
+            "ssrn_regime": ssrn_regime,
+            "ssrn_sep_atr": ssrn_sep_atr,
+            "entry_ema": entry_ema,
             "sqz_on": sqz_on,
             "sqz_count": sqz_count,
             "atr_pct": atr_pct,

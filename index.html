@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LeadingConfluencePro — 24/7 Cloud Macro & ML Dashboard</title>
+  <title>LeadingConfluencePro v2.10 — 24/7 Cloud Quant, SSRN Regime &amp; ML Dashboard</title>
   <style>
     :root {
       --bg: #0b0f17;
@@ -97,7 +97,7 @@
   <div class="container">
     <header>
       <div>
-        <h1>LeadingConfluencePro v2.02 — 24/7 Cloud Quant & ML Intelligence</h1>
+        <h1>LeadingConfluencePro v2.10 — 24/7 Cloud Quant, SSRN Regime &amp; ML Intelligence</h1>
         <div class="subtitle" id="timestamps">Loading cloud telemetry...</div>
         <div id="sessionStrip" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;font-size:0.75rem;"></div>
       </div>
@@ -113,13 +113,21 @@
     <div class="grid-kpi" id="kpiGrid"></div>
 
     <div class="section">
-      <h2>Live Closed-Bar Confirmed Signals (Open Markets Only &bull; Browser RT + 15m Cloud)</h2>
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;">
+        <h2 style="margin:0;">Live Closed-Bar Confirmed Signals (M5 / M15 / H1 &bull; Open Markets &bull; Browser RT + Cloud)</h2>
+        <div id="tfFilterStrip" style="display:flex;gap:6px;">
+          <button class="btn tf-btn" data-tf="ALL" onclick="setTfFilter('ALL')" style="padding:4px 10px;font-size:0.76rem;color:var(--green);border-color:var(--green);">All TFs</button>
+          <button class="btn tf-btn" data-tf="M5" onclick="setTfFilter('M5')" style="padding:4px 10px;font-size:0.76rem;">M5</button>
+          <button class="btn tf-btn" data-tf="M15" onclick="setTfFilter('M15')" style="padding:4px 10px;font-size:0.76rem;">M15</button>
+          <button class="btn tf-btn" data-tf="H1" onclick="setTfFilter('H1')" style="padding:4px 10px;font-size:0.76rem;">H1</button>
+        </div>
+      </div>
       <div id="signalsBox" class="neu">Loading latest live signals...</div>
       <div id="closedSignalsBox" style="margin-top:12px;"></div>
     </div>
 
     <div class="section">
-      <h2>Cross-Asset Watchlist — Live M15 Microstructure + Macro / On-Chain / ETF / COT Matrix</h2>
+      <h2>Cross-Asset Watchlist — Live M15 Microstructure + SSRN Regime + Macro / On-Chain / ETF / COT Matrix</h2>
       <div id="marketNotice" style="display:none;margin-bottom:12px;padding:10px 14px;border-radius:8px;background:rgba(245,185,66,0.10);border:1px solid rgba(245,185,66,0.35);color:var(--gold);font-size:0.84rem;"></div>
       <table>
         <thead>
@@ -136,7 +144,7 @@
             <th title="Distance from institutional VWAP in StdDevs">VWAP-Z</th>
             <th title="Kaufman Efficiency Ratio [0..1]: <0.22 Chop, >=0.38 Trend">KER</th>
             <th title="100-bar ATR volatility percentile [0..100%]">ATR Pct</th>
-            <th title="Causal Higher-Timeframe (H1) bias">HTF</th>
+            <th title="Causal v2 Higher-Timeframe (H1) & SSRN EMA50/200 Regime">HTF / SSRN</th>
             <th title="Bollinger inside Keltner Volatility Squeeze">Sqz</th>
             <th title="Live closed-bar ML net-profit win probability (BUY% / SELL%) vs active ML Gate">ML Win% (B / S)</th>
             <th title="Live setup readiness & minimum Confluence Score gate">Setup / Gate</th>
@@ -211,7 +219,18 @@
       seenSigKeys: new Set(),
       initialSignalsLoaded: false,
       cachedBars: {},
+      tfFilter: "ALL",
     };
+
+    function setTfFilter(tf) {
+      liveState.tfFilter = tf;
+      document.querySelectorAll(".tf-btn").forEach(btn => {
+        const active = btn.dataset.tf === tf;
+        btn.style.color = active ? "var(--green)" : "var(--blue)";
+        btn.style.borderColor = active ? "var(--green)" : "var(--border)";
+      });
+      if (liveState.signals) renderSignals(liveState.signals);
+    }
 
     const CRYPTO_BINANCE_PAIRS = [
       { sym: "BTCUSD", pair: "BTCUSDT", deribit: "BTC-PERPETUAL" },
@@ -234,7 +253,7 @@
       const cfgs = liveState.ml?.optimized_configs || [];
       return (
         cfgs.find(c => String(c.SYMBOL).toUpperCase() === sym && String(c.TIMEFRAME).toUpperCase() === tfName) ||
-        cfgs.find(c => String(c.SYMBOL).toUpperCase() === sym && String(c.TIMEFRAME).toUpperCase() === "M15") ||
+        cfgs.find(c => String(c.SYMBOL).toUpperCase() === sym && String(c.TIMEFRAME).toUpperCase() === "ALL") ||
         cfgs.find(c => String(c.SYMBOL).toUpperCase() === "GLOBAL" && String(c.TIMEFRAME).toUpperCase() === "ALL") ||
         null
       );
@@ -267,6 +286,26 @@
       return "B";
     }
 
+    function resampleM15ToM30(bars15, nowMs) {
+      const buckets = new Map();
+      const halfH = 1800000;
+      for (const b of bars15) {
+        const key = Math.floor(b.t / halfH) * halfH;
+        const cur = buckets.get(key);
+        if (!cur) {
+          buckets.set(key, { t: key, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v });
+        } else {
+          if (b.h > cur.h) cur.h = b.h;
+          if (b.l < cur.l) cur.l = b.l;
+          cur.c = b.c;
+          cur.v += b.v;
+        }
+      }
+      return Array.from(buckets.values())
+        .sort((a, b) => a.t - b.t)
+        .filter(b => (b.t + halfH) <= nowMs);
+    }
+
     function resampleH1ToH4(bars1h, nowMs) {
       const buckets = new Map();
       const fourH = 4 * 3600000;
@@ -285,6 +324,58 @@
       return Array.from(buckets.values())
         .sort((a, b) => a.t - b.t)
         .filter(b => (b.t + fourH) <= nowMs);
+    }
+
+    function computeCausalSSRNRegimeJS(bars, baseMs, htfBars, htfMs) {
+      const n = bars.length;
+      const dirArr = new Int32Array(n);
+      const sepArr = new Float64Array(n);
+      const slopeBars = 3, atrP = 14, fastP = 50, slowP = 200;
+      if (!htfBars || htfBars.length <= slopeBars + 2) return { dirArr, sepArr };
+
+      const m = htfBars.length;
+      const aFast = 2.0 / (fastP + 1.0);
+      const aSlow = 2.0 / (slowP + 1.0);
+      const htfFast = new Float64Array(m);
+      const htfReg = new Int32Array(m);
+      const htfSep = new Float64Array(m);
+      const htfClose = new Float64Array(m);
+      const warmH = Math.min(m - 1, Math.max(atrP, Math.min(Math.floor(slowP / 4), 20)));
+
+      let emaF = htfBars[0].c, emaS = htfBars[0].c;
+      let atrH = htfBars[0].h - htfBars[0].l;
+      for (let h = 0; h < m; h++) {
+        const bh = htfBars[h];
+        if (h > 0) {
+          emaF = aFast * bh.c + (1.0 - aFast) * emaF;
+          emaS = aSlow * bh.c + (1.0 - aSlow) * emaS;
+          const pc = htfBars[h - 1].c;
+          const tr = Math.max(bh.h - bh.l, Math.abs(bh.h - pc), Math.abs(bh.l - pc));
+          atrH = (h < atrP) ? ((atrH * h + tr) / (h + 1)) : ((atrH * (atrP - 1) + tr) / atrP);
+        }
+        htfFast[h] = emaF;
+        htfClose[h] = bh.t + htfMs;
+        if (h >= slopeBars && atrH > 1e-12) {
+          const sep = Math.abs(emaF - emaS) / atrH;
+          htfSep[h] = sep;
+          if (h >= warmH && sep >= 0.10) {
+            const fOld = htfFast[h - slopeBars];
+            if (emaF > emaS && emaF > fOld && bh.c > emaS) htfReg[h] = 1;
+            else if (emaF < emaS && emaF < fOld && bh.c < emaS) htfReg[h] = -1;
+          }
+        }
+      }
+
+      let hp = 0;
+      for (let i = 0; i < n; i++) {
+        const bt = bars[i].t + baseMs;
+        while (hp + 1 < m && htfClose[hp + 1] <= bt) hp++;
+        if (htfClose[hp] <= bt) {
+          dirArr[i] = htfReg[hp];
+          sepArr[i] = htfSep[hp];
+        }
+      }
+      return { dirArr, sepArr };
     }
 
     function computeCausalHTFArray(bars, baseMs, htfBars, htfMs) {
@@ -343,15 +434,20 @@
 
       const atrPeriod = 14, volPeriod = 20, sqzPeriod = 20, kerPeriod = 14, bbMult = 2.0, kcMult = 1.5;
       const pivotLeft = 5, pivotRight = 3, minSqzBars = 4, cooldownBars = 6;
+      const entryEMAPeriod = 20, chBreakBars = 20, pullbackBars = 3;
       const alphaFast = 2.0 / (sqzPeriod + 1.0);
       const alphaSlow = 2.0 / 51.0;
+      const alphaEntry = 2.0 / (entryEMAPeriod + 1.0);
 
       const htfBias = computeCausalHTFArray(bars, barMs, htfBars, htfMs);
+      const { dirArr: ssrnRegime, sepArr: ssrnSepAtr } = computeCausalSSRNRegimeJS(bars, barMs, htfBars, htfMs);
+
       const atr = new Float64Array(n);
       const atrPct = new Float64Array(n).fill(50.0);
       const rvol = new Float64Array(n).fill(1.0);
       const emaFast = new Float64Array(n);
       const emaSlow = new Float64Array(n);
+      const entryEMA = new Float64Array(n);
       const ofi = new Float64Array(n);
       const delta = new Float64Array(n);
       const cvd = new Float64Array(n);
@@ -401,6 +497,7 @@
 
         emaFast[i] = (i === 0) ? bi.c : (alphaFast * bi.c + (1.0 - alphaFast) * emaFast[i - 1]);
         emaSlow[i] = (i === 0) ? bi.c : (alphaSlow * bi.c + (1.0 - alphaSlow) * emaSlow[i - 1]);
+        entryEMA[i] = (i === 0) ? bi.c : (alphaEntry * bi.c + (1.0 - alphaEntry) * entryEMA[i - 1]);
 
         let bvcNet = 0.0;
         if (i > 1) {
@@ -517,11 +614,12 @@
         }
       }
 
-      const warmup = Math.max(65, Math.max(vwapPeriod, sqzPeriod, volPeriod, atrPeriod, kerPeriod) + pivotLeft + pivotRight + 10);
+      const warmup = Math.max(65, Math.max(vwapPeriod, sqzPeriod, volPeriod, atrPeriod, kerPeriod, chBreakBars + 2) + pivotLeft + pivotRight + 10);
       let lastSigBar = -10000, lastSigDir = 0, buyReset = 1, sellReset = 1;
       const lastClosedIdx = n - 1;
-      const maxBarsLookback = (tfName === "M15") ? 5 : 2;
-      const maxAgeMs = (tfName === "M15") ? (3 * 3600000) : (6 * 3600000);
+      let maxBarsLookback = 10, maxAgeMs = 12 * 3600000;
+      if (tfName === "M5") { maxBarsLookback = 36; maxAgeMs = 3.5 * 3600000; }
+      else if (tfName === "M15") { maxBarsLookback = 24; maxAgeMs = 6.5 * 3600000; }
       const nowMs = Date.now();
       const signals = [];
       let latestSigDir = 0;
@@ -531,11 +629,16 @@
         if (bars[i].c > vwapVal[i]) sellReset = 1;
         if (i < warmup) continue;
 
-        const bi = bars[i], at = atr[i], rng = bi.h - bi.l;
-        if (at <= 1e-10 || rng < 0.25 * at) continue;
+        const bi = bars[i], at = atr[i], prevAt = atr[i - 1], rng = bi.h - bi.l;
+        if (at <= 1e-10 || prevAt <= 1e-10) continue;
+        if ((i - lastSigBar) < cooldownBars) continue;
+        if (rng > 3.50 * prevAt) continue;
+        if ((i + 1) < n && Math.abs(bars[i + 1].o - bi.c) > 0.50 * at) continue;
+        if (Math.abs(bi.c - entryEMA[i]) > 3.00 * at) continue;
+        if (rng < 0.25 * at) continue;
+
         const recentSqz = (sqzCount[i - 1] >= minSqzBars || sqzCount[i - 2] >= minSqzBars || sqzCount[i - 3] >= minSqzBars);
         if (atrPct[i] < 8.0 && !recentSqz) continue;
-        if ((i - lastSigBar) < cooldownBars) continue;
 
         const clvI = rng > 1e-12 ? (((bi.c - bi.l) - (bi.h - bi.c)) / rng) : 0.0;
         const body = bi.c - bi.o;
@@ -551,6 +654,31 @@
         const netDelta3 = (delta[i] + delta[i - 1] + delta[i - 2]) / Math.max(sumVol3, 1.0);
         const vwapSlope = vwapVal[i] - vwapVal[i - 3];
         const ker = kerSmooth[i], htfB = htfBias[i], z = vwapZ[i], mb = Number(macroBias) || 0;
+        const ssrnDir = ssrnRegime[i], ssrnSep = ssrnSepAtr[i];
+
+        // SSRN Playbooks 4 (ChBreak) & 5 (EMAPull)
+        let trigBCh = false, trigSCh = false, trigBEm = false, trigSEm = false;
+        if (ssrnDir !== 0) {
+          const chBeg = Math.max(0, i - chBreakBars);
+          let chH = -Infinity, chL = Infinity;
+          for (let k = chBeg; k < i; k++) {
+            if (bars[k].h > chH) chH = bars[k].h;
+            if (bars[k].l < chL) chL = bars[k].l;
+          }
+          if (ssrnDir === 1 && bi.c > chH + 0.05 * prevAt) trigBCh = true;
+          if (ssrnDir === -1 && bi.c < chL - 0.05 * prevAt) trigSCh = true;
+
+          const pbBeg = Math.max(0, i - pullbackBars + 1);
+          const band = 0.20 * prevAt;
+          let emaTouched = false;
+          for (let j = pbBeg; j <= i; j++) {
+            if (bars[j].l <= entryEMA[j] + band && bars[j].h >= entryEMA[j] - band) { emaTouched = true; break; }
+          }
+          if (emaTouched) {
+            if (ssrnDir === 1 && bi.c > entryEMA[i] && bi.c > bi.o) trigBEm = true;
+            if (ssrnDir === -1 && bi.c < entryEMA[i] && bi.c < bi.o) trigSEm = true;
+          }
+        }
 
         let trigBSw = false, trigBSq = false, trigBPl = false, bExt = bi.l;
         if (enSweep && swLow[i - 1] > 0 && (i - swLowBar[i - 1]) <= 80) {
@@ -581,6 +709,10 @@
             const pm = Math.min(bi.l, bars[i - 1].l);
             bExt = (trigBSw || trigBSq) ? Math.min(bExt, pm) : pm;
           }
+        }
+        if (trigBCh || trigBEm) {
+          const sm = Math.min(bi.l, bars[i - 1].l);
+          bExt = (trigBSw || trigBSq || trigBPl) ? Math.min(bExt, sm) : sm;
         }
 
         let trigSSw = false, trigSSq = false, trigSPl = false, sExt = bi.h;
@@ -613,49 +745,59 @@
             sExt = (trigSSw || trigSSq) ? Math.max(sExt, pm) : pm;
           }
         }
+        if (trigSCh || trigSEm) {
+          const sm = Math.max(bi.h, bars[i - 1].h);
+          sExt = (trigSSw || trigSSq || trigSPl) ? Math.max(sExt, sm) : sm;
+        }
 
         let bScore = 0, bPB = "None";
-        const bCnt = (trigBSw ? 1 : 0) + (trigBSq ? 1 : 0) + (trigBPl ? 1 : 0);
+        const bCnt = (trigBSw ? 1 : 0) + (trigBSq ? 1 : 0) + (trigBPl ? 1 : 0) + (trigBCh ? 1 : 0) + (trigBEm ? 1 : 0);
         if (bCnt > 0) {
-          bPB = bCnt > 1 ? "MultiConf" : (trigBSw ? "Sweep/SFP" : (trigBSq ? "SqzBreak" : "VWAPPull"));
+          bPB = bCnt > 1 ? "MultiConf" : (trigBSw ? "Sweep/SFP" : (trigBSq ? "SqzBreak" : (trigBPl ? "VWAPPull" : (trigBCh ? "ChBreak" : "EMAPull"))));
           bScore += 25;
           bScore += ofi[i] >= 0.35 ? 10 : (ofi[i] >= 0.15 ? 6 : 0);
           bScore += netDelta3 >= 0.12 ? 5 : (netDelta3 > 0 ? 2 : 0);
           if ((trigBSw && swLow[i - 1] > 0 && cvd[i] > swLowCVD[i - 1]) || bullVSA) bScore += 5;
           bScore += rvol[i] >= 1.50 ? 10 : (rvol[i] >= 1.20 ? 7 : (rvol[i] >= 1.00 ? 4 : 0));
           if (bullVSA) bScore += 5;
-          if (trigBSw) bScore += z <= 0.25 ? 15 : (z <= 0.85 ? 10 : 4);
+          const pureSweepB = trigBSw && !(trigBSq || trigBPl || trigBCh || trigBEm);
+          if (pureSweepB) bScore += z <= 0.25 ? 15 : (z <= 0.85 ? 10 : 4);
           else bScore += (z >= -0.25 && z <= 1.25) ? 15 : (z <= 1.85 ? 10 : 4);
           bScore += (htfB === 1) ? 10 : (htfB === 0 ? 5 : 0);
-          if (trigBSw && ker <= 0.38) bScore += 5;
-          else if ((trigBSq || trigBPl) && ker >= 0.28) bScore += 5;
+          if (pureSweepB && ker <= 0.38) bScore += 5;
+          else if ((trigBSq || trigBPl || trigBCh || trigBEm) && ker >= 0.28) bScore += 5;
           else bScore += 3;
           bScore += clvI >= 0.55 ? 5 : (clvI >= 0.35 ? 3 : 0);
           if (bi.c > bars[i - 1].h) bScore += 5;
           if (bullFvgDisp > 0.5) bScore += 4;
+          if (ssrnDir === 1) bScore += (ssrnSep >= 0.50 ? 8 : 6);
+          else if (ssrnDir === -1) bScore -= 4;
           bScore += Math.round(0.15 * mb);
           bScore = Math.max(0, Math.min(100, bScore));
         }
 
         let sScore = 0, sPB = "None";
-        const sCnt = (trigSSw ? 1 : 0) + (trigSSq ? 1 : 0) + (trigSPl ? 1 : 0);
+        const sCnt = (trigSSw ? 1 : 0) + (trigSSq ? 1 : 0) + (trigSPl ? 1 : 0) + (trigSCh ? 1 : 0) + (trigSEm ? 1 : 0);
         if (sCnt > 0) {
-          sPB = sCnt > 1 ? "MultiConf" : (trigSSw ? "Sweep/SFP" : (trigSSq ? "SqzBreak" : "VWAPPull"));
+          sPB = sCnt > 1 ? "MultiConf" : (trigSSw ? "Sweep/SFP" : (trigSSq ? "SqzBreak" : (trigSPl ? "VWAPPull" : (trigSCh ? "ChBreak" : "EMAPull"))));
           sScore += 25;
           sScore += ofi[i] <= -0.35 ? 10 : (ofi[i] <= -0.15 ? 6 : 0);
           sScore += netDelta3 <= -0.12 ? 5 : (netDelta3 < 0 ? 2 : 0);
           if ((trigSSw && swHigh[i - 1] > 0 && cvd[i] < swHighCVD[i - 1]) || bearVSA) sScore += 5;
           sScore += rvol[i] >= 1.50 ? 10 : (rvol[i] >= 1.20 ? 7 : (rvol[i] >= 1.00 ? 4 : 0));
           if (bearVSA) sScore += 5;
-          if (trigSSw) sScore += z >= -0.25 ? 15 : (z >= -0.85 ? 10 : 4);
+          const pureSweepS = trigSSw && !(trigSSq || trigSPl || trigSCh || trigSEm);
+          if (pureSweepS) sScore += z >= -0.25 ? 15 : (z >= -0.85 ? 10 : 4);
           else sScore += (z <= 0.25 && z >= -1.25) ? 15 : (z >= -1.85 ? 10 : 4);
           sScore += (htfB === -1) ? 10 : (htfB === 0 ? 5 : 0);
-          if (trigSSw && ker <= 0.38) sScore += 5;
-          else if ((trigSSq || trigSPl) && ker >= 0.28) sScore += 5;
+          if (pureSweepS && ker <= 0.38) sScore += 5;
+          else if ((trigSSq || trigSPl || trigSCh || trigSEm) && ker >= 0.28) sScore += 5;
           else sScore += 3;
           sScore += clvI <= -0.55 ? 5 : (clvI <= -0.35 ? 3 : 0);
           if (bi.c < bars[i - 1].l) sScore += 5;
           if (bearFvgDisp > 0.5) sScore += 4;
+          if (ssrnDir === -1) sScore += (ssrnSep >= 0.50 ? 8 : 6);
+          else if (ssrnDir === 1) sScore -= 4;
           sScore -= Math.round(0.15 * mb);
           sScore = Math.max(0, Math.min(100, sScore));
         }
@@ -711,6 +853,7 @@
                 score: scoreVal,
                 ml_prob: prob != null ? Number(prob.toFixed(3)) : null,
                 macro_bias: mb,
+                ssrn_regime: ssrnDir,
                 entry: Number(entry.toFixed(6)),
                 sl: Number(sl.toFixed(6)),
                 sl_dist_pct: Number((Math.abs(entry - sl) / Math.max(Math.abs(entry), 1e-9) * 100.0).toFixed(2)),
@@ -759,6 +902,8 @@
           atr_pct: Number(atrPct[idx].toFixed(1)),
           sqz_on: sqzOn[idx],
           htf_bias: htfBias[idx],
+          ssrn_regime: ssrnRegime[idx],
+          ssrn_sep_atr: Number(ssrnSepAtr[idx].toFixed(2)),
           min_score: minScore,
           ml_min_prob: Number(mlThresh.toFixed(2)),
           ml_buy_prob: pBuy != null ? Number(pBuy.toFixed(3)) : null,
@@ -775,14 +920,18 @@
       for (const { sym } of CRYPTO_BINANCE_PAIRS) {
         const cached = liveState.cachedBars[sym];
         if (!cached) continue;
-        const { closed15, closed1h } = cached;
+        const { closed5, closed15, closed1h } = cached;
         const macroBias = liveState.macro?.symbols?.[sym]?.bias_score ?? (liveState.signals?.telemetry?.find(t => t.symbol === sym)?.macro_bias ?? 0);
         const mlModel = getResolvedMLModel(sym);
+        const closed30m = resampleM15ToM30(closed15, nowMs);
+        const r5 = (closed5 && closed5.length >= 90)
+          ? evaluateSingleTFJS(sym, "M5", closed5, 300000, closed30m, 1800000, macroBias, getSymConfig(sym, "M5"), mlModel)
+          : { telemetry: null, signals: [] };
         const r15 = evaluateSingleTFJS(sym, "M15", closed15, 900000, closed1h, 3600000, macroBias, getSymConfig(sym, "M15"), mlModel);
         const closed4h = resampleH1ToH4(closed1h, nowMs);
         const r1h = evaluateSingleTFJS(sym, "H1", closed1h, 3600000, closed4h, 14400000, macroBias, getSymConfig(sym, "H1"), mlModel);
         if (r15.telemetry) liveState.liveMicro[sym] = r15.telemetry;
-        nextSignals.push(...r15.signals, ...r1h.signals);
+        nextSignals.push(...r5.signals, ...r15.signals, ...r1h.signals);
       }
       liveState.liveSignals = nextSignals;
     }
@@ -877,11 +1026,13 @@
       const nowMs = Date.now();
       await Promise.all(CRYPTO_BINANCE_PAIRS.map(async ({ sym, pair }) => {
         try {
-          const [r15, r1h] = await Promise.all([
-            fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=15m&limit=300`, { cache: "no-store" }),
-            fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=1h&limit=200`, { cache: "no-store" }),
+          const [r5, r15, r1h] = await Promise.all([
+            fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=5m&limit=360`, { cache: "no-store" }),
+            fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=15m&limit=500`, { cache: "no-store" }),
+            fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=1h&limit=500`, { cache: "no-store" }),
           ]);
           if (!r15.ok) return;
+          const raw5 = r5.ok ? await r5.json() : [];
           const raw15 = await r15.json();
           const raw1h = r1h.ok ? await r1h.json() : [];
           if (!Array.isArray(raw15) || raw15.length < 90) return;
@@ -891,14 +1042,12 @@
             updateSpotPrice(sym, latestClose, "Binance");
           }
 
-          const closed15 = raw15
-            .filter(k => Number(k[6]) <= nowMs)
-            .map(k => ({ t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]), v: Number(k[5]) }));
-          const closed1h = Array.isArray(raw1h)
-            ? raw1h.filter(k => Number(k[6]) <= nowMs).map(k => ({ t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]), v: Number(k[5]) }))
-            : [];
+          const toBar = (k) => ({ t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]), v: Number(k[5]) });
+          const closed5 = Array.isArray(raw5) ? raw5.filter(k => Number(k[6]) <= nowMs).map(toBar) : [];
+          const closed15 = raw15.filter(k => Number(k[6]) <= nowMs).map(toBar);
+          const closed1h = Array.isArray(raw1h) ? raw1h.filter(k => Number(k[6]) <= nowMs).map(toBar) : [];
 
-          liveState.cachedBars[sym] = { closed15, closed1h };
+          liveState.cachedBars[sym] = { closed5, closed15, closed1h };
           anyDone = true;
         } catch (_) {}
       }));
@@ -1071,18 +1220,21 @@
         const rtBadge = s.source === "LIVE_RT" ? `<span class="pill pill-bull"><span class="live-dot"></span>LIVE RT</span>` : "";
         const closedBadge = muted ? `<span class="pill">CLOSED</span>` : "";
         const slPctTxt = s.sl_dist_pct != null ? ` (${s.sl_dist_pct}%)` : "";
+        const ssrnVal = Number(s.ssrn_regime || 0);
+        const ssrnTxt = ssrnVal > 0 ? "BULL" : (ssrnVal < 0 ? "BEAR" : "NEUT");
+        const ssrnCls = ssrnVal > 0 ? "pos" : (ssrnVal < 0 ? "neg" : "neu");
         return `
           <div class="sig-card ${isBuy ? "sig-buy" : "sig-sell"}" style="${muted ? "opacity:0.75;" : ""}">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px;">
               <strong>${s.symbol} ${s.timeframe}</strong>
-              <div style="display:flex;gap:5px;align-items:center;">
+              <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
                 ${rtBadge}${closedBadge}
                 <span class="pill ${gradeCls}">${s.grade || "B"}</span>
                 <span class="pill ${isBuy ? "pill-bull" : "pill-bear"}">${s.direction} (${s.playbook})</span>
               </div>
             </div>
             <div style="font-size:0.82rem;color:var(--muted);margin-bottom:8px;">
-              Closed: ${s.bar_time_utc} &bull; Score <strong>${s.score}/100</strong>${mlTxt} &bull; Macro ${s.macro_bias >= 0 ? "+" : ""}${s.macro_bias}
+              Closed: ${s.bar_time_utc} &bull; Score <strong>${s.score}/100</strong>${mlTxt} &bull; Macro ${s.macro_bias >= 0 ? "+" : ""}${s.macro_bias} &bull; SSRN <span class="${ssrnCls}">${ssrnTxt}</span>
             </div>
             <div style="font-family:monospace;font-size:0.83rem;">
               Entry: ${s.entry} | SL: <span class="neg">${s.sl}</span>${slPctTxt}<br/>
@@ -1101,7 +1253,7 @@
       const pushSig = (s) => {
         if (!s || s.market_open === false) return;
         const barMs = Date.parse(s.bar_time_utc);
-        const maxAge = (s.timeframe === "M15") ? (4 * 3600000) : (8 * 3600000);
+        const maxAge = (s.timeframe === "M5") ? (3.5 * 3600000) : ((s.timeframe === "M15") ? (6.5 * 3600000) : (12 * 3600000));
         if (Number.isFinite(barMs) && (nowMs - barMs) > maxAge) return;
         const key = `${s.symbol}|${s.timeframe}|${s.bar_time_utc}|${s.direction}`;
         const existing = mergedMap.get(key);
@@ -1111,14 +1263,14 @@
       (signals?.recent_confirmed_signals || []).forEach(pushSig);
       (liveState.liveSignals || []).forEach(pushSig);
 
-      const list = Array.from(mergedMap.values()).sort((a, b) => (b.bar_time_utc || "").localeCompare(a.bar_time_utc || ""));
+      const allList = Array.from(mergedMap.values()).sort((a, b) => (b.bar_time_utc || "").localeCompare(a.bar_time_utc || ""));
 
       if (!liveState.initialSignalsLoaded) {
-        list.forEach(s => liveState.seenSigKeys.add(`${s.symbol}|${s.timeframe}|${s.bar_time_utc}|${s.direction}`));
+        allList.forEach(s => liveState.seenSigKeys.add(`${s.symbol}|${s.timeframe}|${s.bar_time_utc}|${s.direction}`));
         if (signals || liveState.liveSignals.length > 0) liveState.initialSignalsLoaded = true;
       } else {
         const freshOnes = [];
-        list.forEach(s => {
+        allList.forEach(s => {
           const k = `${s.symbol}|${s.timeframe}|${s.bar_time_utc}|${s.direction}`;
           if (!liveState.seenSigKeys.has(k)) {
             liveState.seenSigKeys.add(k);
@@ -1136,8 +1288,11 @@
         }
       }
 
+      const list = (liveState.tfFilter === "ALL") ? allList : allList.filter(s => s.timeframe === liveState.tfFilter);
+
       if (!list.length) {
-        box.innerHTML = `<div class="neu">No confirmed signals on currently OPEN markets within the last 3h (M15) / 6h (H1). Browser evaluates BTC/ETH every 30s directly from Binance and cloud scans all 10 assets every ~15 minutes.</div>`;
+        const tfTxt = (liveState.tfFilter === "ALL") ? "M5 (3.5h) / M15 (6.5h) / H1 (12h)" : liveState.tfFilter;
+        box.innerHTML = `<div class="neu">No confirmed signals on currently OPEN markets for ${tfTxt}. Browser evaluates BTC/ETH M5, M15 &amp; H1 every 30s directly from Binance and cloud scans all 10 assets every ~15 minutes.</div>`;
       } else {
         box.innerHTML = renderSignalCardsHTML(list, false);
       }
@@ -1170,6 +1325,10 @@
 
         const mb = r.macro_bias ?? (macro?.symbols?.[r.symbol]?.bias_score ?? 0);
         const htf = r.htf_bias > 0 ? `<span class="pos">BULL</span>` : (r.htf_bias < 0 ? `<span class="neg">BEAR</span>` : `<span class="neu">NEUT</span>`);
+        const ssrnV = Number(r.ssrn_regime || 0);
+        const ssrnBadge = ssrnV > 0 ? `<span class="pos">BULL</span>` : (ssrnV < 0 ? `<span class="neg">BEAR</span>` : `<span class="neu">NEUT</span>`);
+        const sepSub = (r.ssrn_sep_atr != null) ? ` (${fmt(r.ssrn_sep_atr, 2)})` : "";
+        const htfSsrnHtml = `${htf}<div style="font-size:0.72rem;color:var(--muted)">S:${ssrnBadge}${sepSub}</div>`;
         const sqz = r.sqz_on ? `<span class="pill pill-warn">ON</span>` : `<span class="neu">OFF</span>`;
         const isRtLive = Boolean(spot || useRt);
         const isOpen = isRtLive || ((typeof r.market_open === "boolean") ? r.market_open : (r.bar_time_utc ? ((Date.now() - Date.parse(r.bar_time_utc)) < 45 * 60000) : false));
@@ -1217,7 +1376,7 @@
           <td class="${cls(r.vwap_z)}">${r.vwap_z >= 0 ? "+" : ""}${fmt(r.vwap_z,2)}</td>
           <td>${fmt(r.ker,2)}</td>
           <td>${fmt(r.atr_pct,0)}%</td>
-          <td>${htf}</td>
+          <td>${htfSsrnHtml}</td>
           <td>${sqz}</td>
           <td>${mlCellHtml}</td>
           <td>${setupCell}</td>
@@ -1226,7 +1385,7 @@
       if (notice) {
         if (closedCount >= 5) {
           notice.style.display = "block";
-          notice.textContent = `Notice: ${closedCount} of ${baseRows.length} symbols are currently outside market hours (weekend / session close) and display their last closed Friday M15 bar. Live 24/7 Crypto (BTCUSD, ETHUSD) streams real-time spot every 10s and runs the full Playbook + ML signal engine every 30s directly from exchange feeds.`;
+          notice.textContent = `Notice: ${closedCount} of ${baseRows.length} symbols are currently outside market hours (weekend / session close) and display their last closed session M15 bar. Live 24/7 Crypto (BTCUSD, ETHUSD) streams real-time spot every 10s and runs the full v2.10 Playbook + ML engine (M5/M15/H1) every 30s directly from exchange feeds.`;
         } else {
           notice.style.display = "none";
         }

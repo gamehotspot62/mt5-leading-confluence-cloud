@@ -104,7 +104,7 @@ WATCHLIST: Dict[str, Dict[str, Any]] = {
     },
     "US500": {
         "asset_class": "index",
-        "yahoo": "SPY",
+        "yahoo": "ES=F",
         "cot_dataset": "gpe5-46if",
         "cot_code": "13874A",
         "cot_invert": False,
@@ -114,7 +114,7 @@ WATCHLIST: Dict[str, Dict[str, Any]] = {
     },
     "US100": {
         "asset_class": "index",
-        "yahoo": "QQQ",
+        "yahoo": "NQ=F",
         "cot_dataset": "gpe5-46if",
         "cot_code": "209742",
         "cot_invert": False,

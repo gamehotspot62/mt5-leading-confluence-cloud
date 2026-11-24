@@ -1,14 +1,15 @@
 """
 24/7 Cloud Live Signal Scanner & Optional Telegram / Discord Notifier.
 - Loads MacroFlowBias.csv, OptimizedConfig.csv, and MLModelWeights.csv
-- Fetches fresh 1h (also resampled to 4h) candles for all 10 watchlist symbols
-- Evaluates strictly closed bars (iloc[-2]) using identical MQL5 v2.00 logic + ML gate
+- Fetches fresh 5m, 15m (resampled to 30m & 1h; H1->H4 for SSRN/HTF) for all 10 symbols
+- Evaluates strictly closed bars using LeadingConfluencePro v2.10 logic + ML gate
 - Writes data/latest_signals.json and deduplicates alerts via data/alert_state.json
-- Dispatches Telegram/Discord notifications only if secret env vars are configured
+- Only records alert_state keys after Telegram/Discord confirms HTTP 200 ok=True
 """
 
 from __future__ import annotations
 
+import html
 import json
 import math
 import os
@@ -113,13 +114,23 @@ def _resample_1h(df_15m: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _resample_30m(df_15m: pd.DataFrame) -> pd.DataFrame:
+    tmp = df_15m.set_index("time")
+    return (
+        tmp.resample("30min", label="left", closed="left")
+        .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
+        .dropna(subset=["open", "high", "low", "close"])
+        .reset_index()
+    )
+
+
 def _trim_to_closed_bars(df: pd.DataFrame, bar_minutes: int, now_utc: pd.Timestamp) -> pd.DataFrame:
     """Filter to strictly closed grid-aligned bars and strip flat zero-volume post-close ticks."""
     if df is None or df.empty:
         return pd.DataFrame()
     closed = df[df["time"] + pd.Timedelta(minutes=bar_minutes) <= now_utc].copy()
-    if bar_minutes == 15 and not closed.empty:
-        closed = closed[(closed["time"].dt.second == 0) & (closed["time"].dt.minute % 15 == 0)].copy()
+    if bar_minutes in (5, 15) and not closed.empty:
+        closed = closed[(closed["time"].dt.second == 0) & (closed["time"].dt.minute % bar_minutes == 0)].copy()
     closed = closed.reset_index(drop=True)
     trimmed = 0
     while trimmed < 3 and len(closed) > 95:
@@ -217,46 +228,88 @@ def _compute_live_bar_features_and_probs(
     )
 
 
-def _send_notifications(new_alerts: List[Dict[str, Any]]) -> None:
+def _send_notifications(new_alerts: List[Dict[str, Any]]) -> bool:
     if not new_alerts:
-        return
+        return False
 
     tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     tg_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     discord_url = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 
-    lines = ["*LeadingConfluencePro Cloud — Confirmed Live Signals*"]
-    for a in new_alerts:
-        prob_txt = f" | ML {a['ml_prob']*100:.0f}%" if a.get("ml_prob") is not None else ""
-        grade_txt = f" [{a.get('grade', 'B')}]"
-        lines.append(
-            f"• *{a['symbol']} {a['timeframe']}* `{a['direction']}` ({a['playbook']}){grade_txt} "
-            f"| Score `{a['score']}/100`{prob_txt} | Macro `{a['macro_bias']:+d}`\n"
-            f"  Entry: `{a['entry']:.5g}` | SL: `{a['sl']:.5g}` ({a.get('sl_dist_pct', 0):.2f}%) | TP1: `{a['tp1']:.5g}` | TP2: `{a['tp2']:.5g}`"
-        )
-    text_msg = "\n".join(lines)
+    if not (tg_token and tg_chat) and not discord_url:
+        print("Telegram skipped (no credentials in env); alert_state.json NOT modified")
+        return False
+
+    any_sent = False
 
     if tg_token and tg_chat:
-        try:
-            resp = requests.post(
-                f"https://api.telegram.org/bot{tg_token}/sendMessage",
-                json={"chat_id": tg_chat, "text": text_msg, "parse_mode": "Markdown"},
-                timeout=10,
-            )
-            ok_val = None
+        sorted_alerts = sorted(new_alerts, key=lambda x: x.get("bar_time_utc", ""))
+        chunk_size = 8
+        tg_all_ok = True
+        for start in range(0, len(sorted_alerts), chunk_size):
+            batch = sorted_alerts[start : start + chunk_size]
+            lines = ["<b>LeadingConfluencePro v2.10 — Confirmed Live Signals</b>"]
+            for a in batch:
+                sym_h = html.escape(str(a["symbol"]))
+                tf_h = html.escape(str(a["timeframe"]))
+                dir_h = html.escape(str(a["direction"]))
+                pb_h = html.escape(str(a["playbook"]))
+                gr_h = html.escape(str(a.get("grade", "B")))
+                bar_h = html.escape(str(a.get("bar_time_utc", "")))
+                prob_txt = f" | ML {a['ml_prob']*100:.0f}%" if a.get("ml_prob") is not None else ""
+                ssrn_v = int(a.get("ssrn_regime", 0) or 0)
+                ssrn_txt = "BULL" if ssrn_v > 0 else ("BEAR" if ssrn_v < 0 else "NEUT")
+                lines.append(
+                    f"• <b>{sym_h} {tf_h}</b> <code>{dir_h}</code> ({pb_h}) [{gr_h}] "
+                    f"| Score <code>{a['score']}/100</code>{prob_txt} | Macro <code>{a['macro_bias']:+d}</code> | SSRN {ssrn_txt}\n"
+                    f"  Entry: <code>{a['entry']:.5g}</code> | SL: <code>{a['sl']:.5g}</code> ({a.get('sl_dist_pct', 0):.2f}%) "
+                    f"| TP1: <code>{a['tp1']:.5g}</code> | TP2: <code>{a['tp2']:.5g}</code> | Bar: <code>{bar_h}</code>"
+                )
+            text_msg = "\n".join(lines)
             try:
-                ok_val = resp.json().get("ok")
-            except Exception:
-                pass
-            print(f"Telegram notify HTTP {resp.status_code} ok={ok_val}")
-        except Exception as exc:
-            print(f"Telegram notify error: {type(exc).__name__}")
+                resp = requests.post(
+                    f"https://api.telegram.org/bot{tg_token}/sendMessage",
+                    json={
+                        "chat_id": tg_chat,
+                        "text": text_msg,
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": True,
+                    },
+                    timeout=12,
+                )
+                ok_val = None
+                desc = ""
+                try:
+                    j = resp.json()
+                    ok_val = j.get("ok")
+                    desc = str(j.get("description", "")) if not ok_val else ""
+                except Exception:
+                    pass
+                print(f"Telegram notify HTTP {resp.status_code} ok={ok_val}" + (f" desc={desc}" if desc else ""))
+                if not (resp.status_code == 200 and ok_val is True):
+                    tg_all_ok = False
+            except Exception as exc:
+                print(f"Telegram notify error: {type(exc).__name__}")
+                tg_all_ok = False
+        if tg_all_ok:
+            any_sent = True
 
     if discord_url:
         try:
-            requests.post(discord_url, json={"content": text_msg.replace("*", "**")}, timeout=10)
+            dlines = ["**LeadingConfluencePro v2.10 — Confirmed Live Signals**"]
+            for a in new_alerts[:10]:
+                prob_txt = f" | ML {a['ml_prob']*100:.0f}%" if a.get("ml_prob") is not None else ""
+                dlines.append(
+                    f"• **{a['symbol']} {a['timeframe']}** `{a['direction']}` ({a['playbook']}) [{a.get('grade', 'B')}] "
+                    f"| Score `{a['score']}/100`{prob_txt} | Entry `{a['entry']:.5g}` | SL `{a['sl']:.5g}` | TP1 `{a['tp1']:.5g}` | Bar `{a['bar_time_utc']}`"
+                )
+            d_resp = requests.post(discord_url, json={"content": "\n".join(dlines)}, timeout=10)
+            if d_resp.status_code in (200, 204):
+                any_sent = True
         except Exception:
             pass
+
+    return any_sent
 
 
 def run_live_scan() -> Dict[str, Any]:
@@ -281,6 +334,8 @@ def run_live_scan() -> Dict[str, Any]:
     confirmed_signals: List[Dict[str, Any]] = []
     closed_market_signals: List[Dict[str, Any]] = []
     new_alerts: List[Dict[str, Any]] = []
+    pending_alert_keys: List[str] = []
+    pending_set = set()
 
     for sym, meta in WATCHLIST.items():
         df_15m_raw = fetch_yahoo_ohlcv(meta["yahoo"], interval="15m", range_period="60d")
@@ -297,20 +352,30 @@ def run_live_scan() -> Dict[str, Any]:
         df_15m = _trim_to_closed_bars(df_15m_raw, 15, now_dt)
         if len(df_15m) < 160:
             continue
-        if len(df_15m) > 1400:
-            df_15m = df_15m.tail(1400).reset_index(drop=True)
+        if len(df_15m) > 3600:
+            df_15m = df_15m.tail(3600).reset_index(drop=True)
         df_1h = _trim_to_closed_bars(_resample_1h(df_15m), 60, now_dt)
+        df_30m = _trim_to_closed_bars(_resample_30m(df_15m), 30, now_dt)
+
+        df_5m_raw = fetch_yahoo_ohlcv(meta["yahoo"], interval="5m", range_period="5d")
+        df_5m = _trim_to_closed_bars(df_5m_raw, 5, now_dt) if df_5m_raw is not None else pd.DataFrame()
 
         macro_val, macro_note = macro_map.get(sym, macro_map.get("GLOBAL", (0, "Neutral")))
         ml_model = ml_map.get(sym, ml_map.get("GLOBAL"))
 
-        for tf_name, tf_df, base_tf in [("M15", df_15m, "15m"), ("H1", df_1h, "1h")]:
-            if len(tf_df) < 90:
+        tf_specs = [
+            ("M5", df_5m, "5m", df_30m),
+            ("M15", df_15m, "15m", None),
+            ("H1", df_1h, "1h", None),
+        ]
+
+        for tf_name, tf_df, base_tf, htf_override in tf_specs:
+            if tf_df is None or len(tf_df) < 90:
                 continue
 
             cfg = cfg_map.get(
                 (sym, tf_name),
-                cfg_map.get((sym, "M15"), cfg_map.get((sym, "H1"), cfg_map.get(("GLOBAL", "ALL"), {}))),
+                cfg_map.get((sym, "ALL"), cfg_map.get(("GLOBAL", "ALL"), {})),
             )
             params = EngineParams(
                 min_score=int(cfg.get("min_score", 68)),
@@ -332,17 +397,22 @@ def run_live_scan() -> Dict[str, Any]:
                 macro_bias_arr=macro_arr,
                 use_macro_score=True,
                 include_last_bar=True,
+                htf_df_override=htf_override,
             )
 
             last_closed_idx = len(tf_df) - 1
             st = res["state"]
             latest_sig_dir = 0
 
-            # Evaluate signals first so M15 telemetry reflects confirmed signal status
-            max_dash_bars = 5 if tf_name == "M15" else 2
-            max_dash_age = (3 * 3600) if tf_name == "M15" else (6 * 3600)
-            max_alert_bars = 3 if tf_name == "M15" else 1
-            max_alert_age = (90 * 60) if tf_name == "M15" else (180 * 60)
+            if tf_name == "M5":
+                max_dash_bars, max_dash_age = 36, 3.5 * 3600
+                max_alert_bars, max_alert_age = 18, 105 * 60
+            elif tf_name == "M15":
+                max_dash_bars, max_dash_age = 24, 6.5 * 3600
+                max_alert_bars, max_alert_age = 10, 165 * 60
+            else:
+                max_dash_bars, max_dash_age = 10, 12 * 3600
+                max_alert_bars, max_alert_age = 3, 240 * 60
 
             for cand in res["candidates"]:
                 prob = _eval_ml_prob(ml_model, cand["features"])
@@ -375,6 +445,7 @@ def run_live_scan() -> Dict[str, Any]:
                     "score": int(cand["score"]),
                     "ml_prob": round(prob, 3) if prob is not None else None,
                     "macro_bias": int(macro_val),
+                    "ssrn_regime": int(cand.get("ssrn_regime", 0)),
                     "entry": round(entry_val, 6),
                     "sl": round(sl_val, 6),
                     "sl_dist_pct": sl_dist_pct,
@@ -387,9 +458,9 @@ def run_live_scan() -> Dict[str, Any]:
                         confirmed_signals.append(sig_obj)
                     if cand["bar_idx"] >= last_closed_idx - max_alert_bars and bar_age_sec <= max_alert_age:
                         alert_key = f"{sym}|{tf_name}|{sig_obj['bar_time_utc']}|{dir_str}"
-                        if alert_key not in sent_set:
-                            sent_set.add(alert_key)
-                            sent_keys.append(alert_key)
+                        if alert_key not in sent_set and alert_key not in pending_set:
+                            pending_set.add(alert_key)
+                            pending_alert_keys.append(alert_key)
                             new_alerts.append(sig_obj)
                 else:
                     if cand["bar_idx"] >= last_closed_idx - 2:
@@ -418,6 +489,8 @@ def run_live_scan() -> Dict[str, Any]:
                         "atr_pct": round(float(st["atr_pct"][last_closed_idx]), 1),
                         "sqz_on": int(st["sqz_on"][last_closed_idx]),
                         "htf_bias": int(st["htf_bias"][last_closed_idx]),
+                        "ssrn_regime": int(st["ssrn_regime"][last_closed_idx]),
+                        "ssrn_sep_atr": round(float(st["ssrn_sep_atr"][last_closed_idx]), 2),
                         "min_score": params.min_score,
                         "ml_min_prob": round(ml_thresh, 2),
                         "ml_buy_prob": p_buy,
@@ -426,14 +499,18 @@ def run_live_scan() -> Dict[str, Any]:
                     }
                 )
 
-    _send_notifications(new_alerts)
-    sent_keys = sent_keys[-500:]
-    state_file.write_text(json.dumps({"sent_keys": sent_keys}, indent=2), encoding="utf-8")
+    dispatched_ok = _send_notifications(new_alerts)
+    if dispatched_ok and pending_alert_keys:
+        sent_keys.extend(pending_alert_keys)
+        sent_keys = sent_keys[-500:]
+        state_file.write_text(json.dumps({"sent_keys": sent_keys}, indent=2), encoding="utf-8")
+
+    confirmed_signals.sort(key=lambda x: x.get("bar_time_utc", ""), reverse=True)
 
     output = {
         "updated_utc": now_iso,
         "watchlist_count": len(watchlist_telemetry),
-        "fresh_alerts_dispatched": len(new_alerts),
+        "fresh_alerts_dispatched": len(new_alerts) if dispatched_ok else 0,
         "recent_confirmed_signals": confirmed_signals,
         "closed_market_last_signals": closed_market_signals,
         "telemetry": watchlist_telemetry,

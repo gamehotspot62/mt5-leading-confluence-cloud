@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "LeadingConfluencePro Cloud Architecture"
 #property link      "https://github.com/gamehotspot62/mt5-leading-confluence-cloud"
-#property version   "2.00"
+#property version   "2.10"
 #property service
 
 //--- Input Parameters
@@ -20,6 +20,12 @@ input int    InpPollIntervalSeconds = 300;   // Poll Interval in Seconds (Defaul
 input int    InpHttpTimeoutMs       = 10000; // HTTP Request Timeout (ms)
 input bool   InpUseCommonFiles      = false; // Write to Terminal\\Common\\Files (Share Across MT5 Terminals)
 input bool   InpVerboseLog          = true;  // Print Sync Summary to Terminal Experts Log
+
+input group "=== 3. Optional Instant MT5 -> Telegram Relay ==="
+input bool   InpEnableTelegramRelay = true;  // Relay Queued MT5 Signals to Telegram (Needs Token & ChatID)
+input string InpTelegramBotToken    = "";    // Telegram Bot Token (Leave Blank to Disable)
+input string InpTelegramChatID      = "";    // Telegram Chat ID (Leave Blank to Disable)
+input int    InpOutboxPollSeconds   = 3;     // Outbox Poll Interval in Seconds
 
 //+------------------------------------------------------------------+
 //| Helper: Fetch HTTPS Text Payload via MQL5 WebRequest             |
@@ -184,24 +190,190 @@ void SyncAllCloudFeeds()
 }
 
 //+------------------------------------------------------------------+
+//| Helper: Percent-Encode UTF-8 Text for Form Body                  |
+//+------------------------------------------------------------------+
+string UrlEncodeUTF8(const string text)
+{
+   uchar bytes[];
+   int n = StringToCharArray(text, bytes, 0, WHOLE_ARRAY, CP_UTF8);
+   string out = "";
+   for(int i = 0; i < n; i++)
+   {
+      uchar ch = bytes[i];
+      if(ch == 0) break;
+      if((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+         ch == '-' || ch == '_' || ch == '.' || ch == '~')
+      {
+         out += CharToString(ch);
+      }
+      else if(ch == ' ')
+      {
+         out += "+";
+      }
+      else
+      {
+         out += StringFormat("%%%02X", ch);
+      }
+   }
+   return out;
+}
+
+//+------------------------------------------------------------------+
+//| Helper: Send Single Message to Telegram Bot API via WebRequest   |
+//+------------------------------------------------------------------+
+bool SendTelegramText(const string msg)
+{
+   if(StringLen(InpTelegramBotToken) <= 10 || StringLen(InpTelegramChatID) == 0 || StringLen(msg) == 0)
+      return false;
+
+   string url = "https://api.telegram.org/bot" + InpTelegramBotToken + "/sendMessage";
+   string bodyStr = "chat_id=" + UrlEncodeUTF8(InpTelegramChatID) +
+                    "&disable_web_page_preview=true&text=" + UrlEncodeUTF8(msg);
+   char post[];
+   int nBytes = StringToCharArray(bodyStr, post, 0, WHOLE_ARRAY, CP_UTF8);
+   if(nBytes > 0 && post[nBytes - 1] == 0)
+      ArrayResize(post, nBytes - 1);
+
+   char   result[];
+   string resultHeaders = "";
+   string headers = "Content-Type: application/x-www-form-urlencoded\r\nUser-Agent: MetaTrader5-LeadingConfluenceBridge/2.10\r\n";
+
+   ResetLastError();
+   int res = WebRequest("POST", url, headers, InpHttpTimeoutMs, post, result, resultHeaders);
+   if(res == -1)
+   {
+      int err = GetLastError();
+      if(err == 4014)
+      {
+         Print("LeadingConfluenceCloudBridge [ERROR 4014]: Telegram URL not allowed! ",
+               "In MT5 go to Tools -> Options -> Expert Advisors -> add: https://api.telegram.org");
+      }
+      else
+      {
+         PrintFormat("LeadingConfluenceCloudBridge: Telegram WebRequest failed (error=%d)", err);
+      }
+      return false;
+   }
+
+   string resp = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+   if(res == 200 && StringFind(resp, "\"ok\":true") >= 0)
+      return true;
+
+   PrintFormat("LeadingConfluenceCloudBridge: Telegram HTTP %d (%s)", res, StringSubstr(resp, 0, 120));
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Process Queued MT5 Signals in LCP_TelegramOutbox.txt              |
+//+------------------------------------------------------------------+
+void ProcessTelegramOutbox()
+{
+   if(!InpEnableTelegramRelay || StringLen(InpTelegramBotToken) <= 10 || StringLen(InpTelegramChatID) == 0)
+      return;
+
+   int commonFlag = InpUseCommonFiles ? FILE_COMMON : 0;
+   if(!FileIsExist("LCP_TelegramOutbox.txt", commonFlag))
+      return;
+
+   int fh = FileOpen("LCP_TelegramOutbox.txt", FILE_READ | FILE_TXT | FILE_ANSI | commonFlag);
+   if(fh == INVALID_HANDLE)
+      return;
+
+   string queue[];
+   while(!FileIsEnding(fh))
+   {
+      string ln = FileReadString(fh);
+      StringReplace(ln, "\r", "");
+      StringTrimLeft(ln);
+      StringTrimRight(ln);
+      if(StringLen(ln) > 0)
+      {
+         int k = ArraySize(queue);
+         ArrayResize(queue, k + 1);
+         queue[k] = ln;
+      }
+   }
+   FileClose(fh);
+
+   int total = ArraySize(queue);
+   if(total == 0)
+   {
+      FileDelete("LCP_TelegramOutbox.txt", commonFlag);
+      return;
+   }
+
+   string failed[];
+   int sentCnt = 0;
+   for(int i = 0; i < total; i++)
+   {
+      if(IsStopped())
+      {
+         for(int r = i; r < total; r++)
+         {
+            int fk = ArraySize(failed);
+            ArrayResize(failed, fk + 1);
+            failed[fk] = queue[r];
+         }
+         break;
+      }
+
+      if(SendTelegramText(queue[i]))
+         sentCnt++;
+      else
+      {
+         int fk = ArraySize(failed);
+         ArrayResize(failed, fk + 1);
+         failed[fk] = queue[i];
+      }
+   }
+
+   if(ArraySize(failed) == 0)
+   {
+      FileDelete("LCP_TelegramOutbox.txt", commonFlag);
+   }
+   else
+   {
+      int wfh = FileOpen("LCP_TelegramOutbox.txt", FILE_WRITE | FILE_TXT | FILE_ANSI | commonFlag);
+      if(wfh != INVALID_HANDLE)
+      {
+         for(int i = 0; i < ArraySize(failed); i++)
+            FileWriteString(wfh, failed[i] + "\r\n");
+         FileClose(wfh);
+      }
+   }
+
+   if(sentCnt > 0 && InpVerboseLog)
+      PrintFormat("LeadingConfluenceCloudBridge: Relayed %d MT5 alert(s) to Telegram (remaining=%d).", sentCnt, ArraySize(failed));
+}
+
+//+------------------------------------------------------------------+
 //| Service Program Entry Point                                      |
 //+------------------------------------------------------------------+
 void OnStart()
 {
-   Print("LeadingConfluenceCloudBridge v2.00 service started.");
+   Print("LeadingConfluenceCloudBridge v2.10 service started.");
 
-   int intervalSec = MathMax(30, InpPollIntervalSeconds);
+   int syncTargetMs   = MathMax(30, InpPollIntervalSeconds) * 1000;
+   int outboxTargetMs = MathMax(1, InpOutboxPollSeconds) * 1000;
+   int syncElapsedMs   = syncTargetMs;
+   int outboxElapsedMs = outboxTargetMs;
+
    while(!IsStopped())
    {
-      SyncAllCloudFeeds();
-
-      int elapsedMs = 0;
-      int targetMs  = intervalSec * 1000;
-      while(elapsedMs < targetMs && !IsStopped())
+      if(syncElapsedMs >= syncTargetMs)
       {
-         Sleep(500);
-         elapsedMs += 500;
+         SyncAllCloudFeeds();
+         syncElapsedMs = 0;
       }
+      if(outboxElapsedMs >= outboxTargetMs)
+      {
+         ProcessTelegramOutbox();
+         outboxElapsedMs = 0;
+      }
+
+      Sleep(500);
+      syncElapsedMs   += 500;
+      outboxElapsedMs += 500;
    }
 
    Print("LeadingConfluenceCloudBridge service stopped.");
