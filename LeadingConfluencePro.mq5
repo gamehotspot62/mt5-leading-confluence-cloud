@@ -7,13 +7,14 @@
 //+------------------------------------------------------------------+
 #property copyright "LeadingConfluencePro Quantitative Architecture"
 #property link      "https://github.com/gamehotspot62/mt5-leading-confluence-cloud"
-#property version   "4.00"
-#property description "Universal non-repainting auto-symbol adaptive indicator v4.00:"
-#property description "1) Auto-Detects Chart Symbol & Asset Class -> Unique Strategy DNA & Data"
-#property description "2) BVC + CLV Order Flow Delta & CVD Divergence (microstructure)"
-#property description "3) Liquidity Sweep / SFP, Volatility Squeeze & Adaptive VWAP Pullback"
-#property description "4) Causal HTF Alignment, UTC Session Window & Symbol Macro Weight"
-#property description "5) Dedicated 18-Feature Empirical-Bayes Per-Symbol ML Meta-Filter"
+#property version   "2.02"
+#property description "Universal non-repainting leading confluence indicator v2.01:"
+#property description "1) BVC + CLV Order Flow Delta & CVD Divergence (microstructure)"
+#property description "2) Wyckoff Liquidity Sweep / SFP Reversal (behavioral stop hunts)"
+#property description "3) Bollinger-Keltner Volatility Squeeze & OLS Momentum"
+#property description "4) Adaptive VWAP Fair Value Bands + VSA Relative Volume + FVG/Disp"
+#property description "5) Kaufman Efficiency Ratio Regime, ATR Percentile & Causal MTF"
+#property description "6) 24/7 Cloud Macro/On-Chain/ETF/COT Bias, Adaptive Params & ML Filter"
 
 #property indicator_chart_window
 #property indicator_buffers 11
@@ -76,20 +77,12 @@ enum ENUM_VOL_SOURCE
    VOL_REAL = 2  // Force Real Volume
 };
 
-enum ENUM_SIGNAL_PROFILE
-{
-   PROFILE_BALANCED_PRO = 0, // Balanced Pro (Cloud ML Gate: ~70%+ Win, Good Signal Count)
-   PROFILE_ACTIVE_HIGH  = 1, // Active High Count (Relaxed ML -4%: Max Chart History)
-   PROFILE_SNIPER_APLUS = 2  // Sniper A+ Only (Strict ML +3.5%: Highest Precision)
-};
-
 //--- Input Parameters
 input group "=== 1. Confluence & Signal Confirmation ==="
-input ENUM_SIGNAL_PROFILE InpSignalProfile         = PROFILE_BALANCED_PRO; // Chart Signal Profile (Pro / Active / Sniper)
 input ENUM_STRICTNESS InpStrictnessMode           = MODE_BALANCED; // Signal Strictness Preset (Manual Fallback)
 input int             InpCustomMinScore           = 68;            // Custom Min Score (0-100, used if MODE_CUSTOM)
-input int             InpMinBarsBetweenSignals    = 4;             // Minimum Cooldown Bars Between Signals
-input bool            InpAllowConsecutiveSameDir  = true;          // Allow Same-Direction Signals Without VWAP Reset
+input int             InpMinBarsBetweenSignals    = 6;             // Minimum Cooldown Bars Between Signals
+input bool            InpAllowConsecutiveSameDir  = false;         // Allow Same-Direction Signals Without VWAP Reset
 input bool            InpEnableSweepPlaybook      = true;          // Enable Playbook 1: Liquidity Sweep / SFP
 input bool            InpEnableSqueezePlaybook    = true;          // Enable Playbook 2: Volatility Squeeze Breakout
 input bool            InpEnableVWAPPullbackPlaybook = true;        // Enable Playbook 3: VWAP Pullback Continuation
@@ -117,10 +110,10 @@ input ENUM_TIMEFRAMES InpHTFTimeframe             = PERIOD_CURRENT;// HTF Timefr
 
 input group "=== 4. Risk Levels (SL / TP Projections) ==="
 input double          InpSLBufferATR              = 0.25;          // Stop Loss Structural Buffer (Manual Fallback)
-input double          InpMinSLATR                 = 1.10;          // Minimum Stop Loss Distance (ATR Mult)
+input double          InpMinSLATR                 = 0.80;          // Minimum Stop Loss Distance (ATR Mult)
 input double          InpMaxSLATR                 = 2.50;          // Maximum Stop Loss Distance (ATR Mult)
-input double          InpTP1RiskMult              = 0.50;          // Take Profit 1 R-Multiple (Manual Fallback)
-input double          InpTP2RiskMult              = 3.00;          // Take Profit 2 R-Multiple (Manual Fallback)
+input double          InpTP1RiskMult              = 1.5;           // Take Profit 1 R-Multiple (Manual Fallback)
+input double          InpTP2RiskMult              = 2.5;           // Take Profit 2 R-Multiple (Manual Fallback)
 input bool            InpShowLastTradeLines       = true;          // Draw Latest Signal Entry / SL / TP1 / TP2 Lines
 
 input group "=== 5. External Macro & Cloud ML Adaptive Bridge ==="
@@ -138,7 +131,7 @@ input bool            InpShowDashboard            = true;          // Show On-Ch
 input ENUM_BASE_CORNER InpDashCorner              = CORNER_LEFT_UPPER; // Dashboard Corner
 input int             InpDashX                    = 14;            // Dashboard X Offset (Pixels)
 input int             InpDashY                    = 24;            // Dashboard Y Offset (Pixels)
-input int             InpMaxHistoryBars           = 5000;          // Max History Bars to Process (0 = All Bars)
+input int             InpMaxHistoryBars           = 3000;          // Max History Bars to Process (0 = All Bars)
 input bool            InpEnableAlert              = true;          // Popup Terminal Alert on Confirmed Closed Bar
 input bool            InpEnablePush               = false;         // Mobile Push Notification
 input bool            InpEnableEmail              = false;         // Email Notification
@@ -199,36 +192,28 @@ int    g_buyReset[];
 int    g_sellReset[];
 int    g_sigPlaybook[];
 
-//--- Effective Runtime Parameters (Overridden by Cloud Symbol-DNA Config when enabled & matched)
-int    g_effMinScore       = 65;
+//--- Effective Runtime Parameters (Overridden by Cloud Adaptive Config when enabled & matched)
+int    g_effMinScore       = 68;
 int    g_effVWAPPeriod     = 50;
 double g_effSLBufferATR    = 0.25;
-double g_effTP1Mult        = 0.50;
-double g_effTP2Mult        = 3.00;
+double g_effTP1Mult        = 1.5;
+double g_effTP2Mult        = 2.5;
 bool   g_effEnSweep        = true;
 bool   g_effEnSqueeze      = true;
 bool   g_effEnPullback     = true;
-double g_effMLMinProb      = 0.65;
-int    g_effSessStartUTC   = 0;
-int    g_effSessEndUTC     = 24;
-int    g_effHTFMode        = 0;        // 0=Balanced, 1=StrictTrend, 2=FlexSweep
-double g_effMacroWeight    = 0.15;
-int    g_effCooldownBars   = 4;
-string g_effStrategyTag    = "ALL_24H";
-string g_detectedClass     = "GLOBAL";
+double g_effMLMinProb      = 0.50;
 bool   g_cloudConfigLoaded = false;
 string g_cloudConfigSource = "Manual";
 bool   g_cloudConfigDirty  = false;
 
-//--- Cloud ML Logistic Meta-Model State (Supports 18-Feature v3.50 & Legacy 10-Feature CSVs)
+//--- Cloud ML Logistic Meta-Model State
 bool   g_mlLoaded          = false;
 string g_mlModelSym        = "OFF";
-int    g_mlFeatCount       = 18;
 double g_mlIntercept       = 0.0;
-double g_mlMinProb         = 0.65;
-double g_mlMean[18];
-double g_mlStd[18];
-double g_mlWeight[18];
+double g_mlMinProb         = 0.50;
+double g_mlMean[10];
+double g_mlStd[10];
+double g_mlWeight[10];
 
 //--- Runtime Lifecycle Globals
 string          g_prefix               = "";
@@ -250,20 +235,6 @@ int             g_lastVisualMacroBias  = 999999;
 #define PB_SQUEEZE      2
 #define PB_VWAP_PULL    3
 #define PB_MULTI        4
-
-double GetProfileMLOffset()
-{
-   if(InpSignalProfile == PROFILE_ACTIVE_HIGH)  return -0.040;
-   if(InpSignalProfile == PROFILE_SNIPER_APLUS) return  0.035;
-   return 0.0;
-}
-
-string GetProfileName()
-{
-   if(InpSignalProfile == PROFILE_ACTIVE_HIGH)  return "Active";
-   if(InpSignalProfile == PROFILE_SNIPER_APLUS) return "Sniper";
-   return "Pro";
-}
 
 //+------------------------------------------------------------------+
 //| Helper: Standard Normal CDF (Abramowitz & Stegun 7.1.26)         |
@@ -477,81 +448,19 @@ string NormalizeSymbolKey(const string sym)
    // Map common broker aliases & substrings to canonical cloud universe keys
    if(StringFind(upper, "XAUUSD") >= 0 || StringFind(upper, "GOLD") >= 0)   return "XAUUSD";
    if(StringFind(upper, "XAGUSD") >= 0 || StringFind(upper, "SILVER") >= 0) return "XAGUSD";
-   if(StringFind(upper, "BTCUSD") >= 0 || StringFind(upper, "BTCUSDT") >= 0 ||
-      upper == "BITCOIN")                                                   return "BTCUSD";
-   if(StringFind(upper, "ETHUSD") >= 0 || StringFind(upper, "ETHUSDT") >= 0 ||
-      upper == "ETHEREUM")                                                  return "ETHUSD";
+   if(StringFind(upper, "BTCUSD") >= 0 || upper == "BITCOIN")               return "BTCUSD";
+   if(StringFind(upper, "ETHUSD") >= 0 || upper == "ETHEREUM")              return "ETHUSD";
    if(StringFind(upper, "EURUSD") >= 0)                                     return "EURUSD";
    if(StringFind(upper, "GBPUSD") >= 0)                                     return "GBPUSD";
    if(StringFind(upper, "USDJPY") >= 0)                                     return "USDJPY";
    if(StringFind(upper, "WTI") >= 0 || StringFind(upper, "XTIUSD") >= 0 ||
-      StringFind(upper, "XBRUSD") >= 0 || StringFind(upper, "UKOIL") >= 0 ||
-      StringFind(upper, "BRENT") >= 0 || StringFind(upper, "USOUSD") >= 0 ||
-      upper == "CL" || StringFind(upper, "USOIL") >= 0)                     return "USOIL";
+      StringFind(upper, "USOUSD") >= 0 || upper == "CL" || upper == "USOIL") return "USOIL";
    if(StringFind(upper, "USTEC") >= 0 || StringFind(upper, "NAS100") >= 0 ||
-      StringFind(upper, "NQ100") >= 0 || upper == "NQ" ||
-      StringFind(upper, "NDX") >= 0 || StringFind(upper, "US100") >= 0)     return "US100";
+      StringFind(upper, "NDX") >= 0 || StringFind(upper, "US100") >= 0)    return "US100";
    if(StringFind(upper, "SPX500") >= 0 || StringFind(upper, "SP500") >= 0 ||
-      upper == "ES" || upper == "SPX" || StringFind(upper, "US500") >= 0)   return "US500";
+      StringFind(upper, "US500") >= 0)                                     return "US500";
 
    return upper;
-}
-
-//+------------------------------------------------------------------+
-//| Helper: Auto-Detect Asset Class for Any Chart Symbol             |
-//+------------------------------------------------------------------+
-string DetectAssetClassKey(const string sym, const string normSym)
-{
-   string u = normSym;
-   StringToUpper(u);
-
-   if(StringFind(u, "XAU") >= 0 || StringFind(u, "XAG") >= 0 ||
-      StringFind(u, "GOLD") >= 0 || StringFind(u, "SILVER") >= 0 ||
-      StringFind(u, "XPT") >= 0 || StringFind(u, "XPD") >= 0 ||
-      StringFind(u, "PLATINUM") >= 0 || StringFind(u, "COPPER") >= 0)
-      return "CLASS_METALS";
-
-   if(StringFind(u, "BTC") >= 0 || StringFind(u, "ETH") >= 0 ||
-      StringFind(u, "SOL") >= 0 || StringFind(u, "XRP") >= 0 ||
-      StringFind(u, "LTC") >= 0 || StringFind(u, "ADA") >= 0 ||
-      StringFind(u, "DOGE") >= 0 || StringFind(u, "BNB") >= 0 ||
-      StringFind(u, "AVAX") >= 0 || StringFind(u, "CRYPTO") >= 0)
-      return "CLASS_CRYPTO";
-
-   if(StringFind(u, "OIL") >= 0 || StringFind(u, "WTI") >= 0 ||
-      StringFind(u, "BRENT") >= 0 || StringFind(u, "NGAS") >= 0 ||
-      StringFind(u, "XTI") >= 0 || StringFind(u, "XBR") >= 0 || u == "CL")
-      return "CLASS_ENERGY";
-
-   if(StringFind(u, "US500") >= 0 || StringFind(u, "US100") >= 0 ||
-      StringFind(u, "US30") >= 0 || StringFind(u, "SPX") >= 0 ||
-      StringFind(u, "SP500") >= 0 || StringFind(u, "NDX") >= 0 ||
-      StringFind(u, "NAS") >= 0 || StringFind(u, "USTEC") >= 0 ||
-      StringFind(u, "DJ30") >= 0 || StringFind(u, "WS30") >= 0 ||
-      StringFind(u, "DOW") >= 0 || StringFind(u, "GER") >= 0 ||
-      StringFind(u, "DE40") >= 0 || StringFind(u, "DAX") >= 0 ||
-      StringFind(u, "UK100") >= 0 || StringFind(u, "FTSE") >= 0 ||
-      StringFind(u, "JP225") >= 0 || StringFind(u, "NI225") >= 0 ||
-      StringFind(u, "FRA40") >= 0 || StringFind(u, "AUS200") >= 0 ||
-      StringFind(u, "HK50") >= 0)
-      return "CLASS_INDEX";
-
-   string fxCcy[8] = {"EUR", "GBP", "USD", "JPY", "CHF", "AUD", "NZD", "CAD"};
-   int ccyHits = 0;
-   for(int c = 0; c < 8; c++)
-      if(StringFind(u, fxCcy[c]) >= 0) ccyHits++;
-   if(ccyHits >= 2)
-      return "CLASS_FX";
-
-   string symPath = SymbolInfoString(sym, SYMBOL_PATH);
-   StringToUpper(symPath);
-   if(StringFind(symPath, "CRYPTO") >= 0) return "CLASS_CRYPTO";
-   if(StringFind(symPath, "METAL") >= 0)  return "CLASS_METALS";
-   if(StringFind(symPath, "ENERGY") >= 0 || StringFind(symPath, "OIL") >= 0) return "CLASS_ENERGY";
-   if(StringFind(symPath, "IND") >= 0 || StringFind(symPath, "EQUIT") >= 0)  return "CLASS_INDEX";
-   if(StringFind(symPath, "FOREX") >= 0 || StringFind(symPath, "FX") >= 0)    return "CLASS_FX";
-
-   return "GLOBAL";
 }
 
 //+------------------------------------------------------------------+
@@ -697,17 +606,10 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
    bool   prevSw       = g_effEnSweep;
    bool   prevSq       = g_effEnSqueeze;
    bool   prevPl       = g_effEnPullback;
-   double prevMLProb    = g_effMLMinProb;
-   int    prevSess0     = g_effSessStartUTC;
-   int    prevSess1     = g_effSessEndUTC;
-   int    prevHTFM      = g_effHTFMode;
-   double prevMacW      = g_effMacroWeight;
-   int    prevCD        = g_effCooldownBars;
-   string prevTag       = g_effStrategyTag;
-   bool   prevMLLoaded  = g_mlLoaded;
-   int    prevMLFCount  = g_mlFeatCount;
-   double prevMLInt     = g_mlIntercept;
-   double prevMLW0      = g_mlWeight[0];
+   double prevMLProb   = g_effMLMinProb;
+   bool   prevMLLoaded = g_mlLoaded;
+   double prevMLInt    = g_mlIntercept;
+   double prevMLW0     = g_mlWeight[0];
 
    // Defaults from user inputs
    g_effMinScore   = GetManualMinScoreThreshold();
@@ -718,27 +620,20 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
    g_effEnSweep    = InpEnableSweepPlaybook;
    g_effEnSqueeze  = InpEnableSqueezePlaybook;
    g_effEnPullback = InpEnableVWAPPullbackPlaybook;
-   g_effMLMinProb  = 0.65;
-   g_effSessStartUTC = 0;
-   g_effSessEndUTC   = 24;
-   g_effHTFMode      = 0;
-   g_effMacroWeight  = 0.15;
-   g_effCooldownBars = MathMax(1, InpMinBarsBetweenSignals);
-   g_effStrategyTag  = "ALL_24H";
+   g_effMLMinProb  = 0.50;
    g_cloudConfigLoaded = false;
    g_cloudConfigSource = "Manual";
 
    string symUpper = _Symbol;
    StringToUpper(symUpper);
    string normSym  = NormalizeSymbolKey(_Symbol);
-   g_detectedClass = DetectAssetClassKey(_Symbol, normSym);
    string tfStr    = EnumToString(_Period);
    StringReplace(tfStr, "PERIOD_", "");
    StringToUpper(tfStr);
 
    int commonFlag = InpUseCommonFiles ? FILE_COMMON : 0;
 
-   // 1) Read OptimizedConfig.csv (priority: EXACT/TF -> NORM/TF -> NORM/ALL -> CLASS/TF -> CLASS/ALL -> GLOBAL/ALL)
+   // 1) Read OptimizedConfig.csv (priority: EXACT/TF -> NORM/TF -> NORM/ALL -> GLOBAL/ALL)
    bool cfgHadMLProb = false;
    if(InpUseCloudAdaptiveSettings && StringLen(InpOptConfigCSVFile) > 0 && FileIsExist(InpOptConfigCSVFile, commonFlag))
    {
@@ -755,12 +650,6 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
          bool   bSq       = g_effEnSqueeze;
          bool   bPl       = g_effEnPullback;
          double bMLProb   = 0.50;
-         int    bSess0    = 0;
-         int    bSess1    = 24;
-         int    bHTFMode  = 0;
-         double bMacW     = 0.15;
-         int    bCD       = MathMax(1, InpMinBarsBetweenSignals);
-         string bTag      = "ALL_24H";
          string bSrc      = "Manual";
 
          while(!FileIsEnding(fh))
@@ -789,12 +678,10 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
 
             int rank = 99;
             string srcLabel = "";
-            if(p[0] == symUpper && p[1] == tfStr)               { rank = 1; srcLabel = symUpper + "/" + tfStr; }
-            else if(p[0] == normSym && p[1] == tfStr)           { rank = 2; srcLabel = normSym + "/" + tfStr; }
-            else if(p[0] == normSym && p[1] == "ALL")           { rank = 3; srcLabel = normSym + "/ALL"; }
-            else if(p[0] == g_detectedClass && p[1] == tfStr)   { rank = 4; srcLabel = g_detectedClass + "/" + tfStr; }
-            else if(p[0] == g_detectedClass && p[1] == "ALL")   { rank = 5; srcLabel = g_detectedClass; }
-            else if(p[0] == "GLOBAL" && p[1] == "ALL")          { rank = 6; srcLabel = "GLOBAL"; }
+            if(p[0] == symUpper && p[1] == tfStr)      { rank = 1; srcLabel = symUpper + "/" + tfStr; }
+            else if(p[0] == normSym && p[1] == tfStr)  { rank = 2; srcLabel = normSym + "/" + tfStr; }
+            else if(p[0] == normSym && p[1] == "ALL")  { rank = 3; srcLabel = normSym + "/ALL"; }
+            else if(p[0] == "GLOBAL" && p[1] == "ALL") { rank = 4; srcLabel = "GLOBAL"; }
 
             if(rank < bestRank)
             {
@@ -802,26 +689,12 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
                bMinScore = MathMax(40, MathMin(95, (int)StringToInteger(p[2])));
                bVwapP    = MathMax(10, MathMin(300, (int)StringToInteger(p[3])));
                bSLBuf    = MathMax(0.05, MathMin(1.50, StringToDouble(p[4])));
-               bTP1      = MathMax(0.35, MathMin(5.00, StringToDouble(p[5])));
+               bTP1      = MathMax(0.50, MathMin(5.00, StringToDouble(p[5])));
                bTP2      = MathMax(bTP1, MathMin(8.00, StringToDouble(p[6])));
                bSw       = (StringToInteger(p[7]) != 0);
                bSq       = (StringToInteger(p[8]) != 0);
                bPl       = (StringToInteger(p[9]) != 0);
                bMLProb   = MathMax(0.05, MathMin(0.95, StringToDouble(p[10])));
-               if(cnt >= 20)
-               {
-                  bSess0   = (_Period < PERIOD_D1) ? MathMax(0, MathMin(23, (int)StringToInteger(p[14]))) : 0;
-                  bSess1   = (_Period < PERIOD_D1) ? MathMax(1, MathMin(24, (int)StringToInteger(p[15]))) : 24;
-                  bHTFMode = MathMax(0, MathMin(2, (int)StringToInteger(p[16])));
-                  bMacW    = MathMax(0.0, MathMin(0.50, StringToDouble(p[17])));
-                  bCD      = MathMax(1, MathMin(20, (int)StringToInteger(p[18])));
-                  bTag     = p[19];
-               }
-               else
-               {
-                  bSess0 = 0; bSess1 = 24; bHTFMode = 0; bMacW = 0.15;
-                  bCD = MathMax(1, InpMinBarsBetweenSignals); bTag = "ALL_24H";
-               }
                bSrc      = srcLabel;
             }
          }
@@ -838,12 +711,6 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
             g_effEnSqueeze      = bSq;
             g_effEnPullback     = bPl;
             g_effMLMinProb      = bMLProb;
-            g_effSessStartUTC   = bSess0;
-            g_effSessEndUTC     = bSess1;
-            g_effHTFMode        = bHTFMode;
-            g_effMacroWeight    = bMacW;
-            g_effCooldownBars   = bCD;
-            g_effStrategyTag    = bTag;
             g_cloudConfigLoaded = true;
             g_cloudConfigSource = bSrc;
             cfgHadMLProb        = true;
@@ -851,13 +718,12 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
       }
    }
 
-   // 2) Read MLModelWeights.csv (priority: EXACT -> NORM -> CLASS -> GLOBAL, supports 18-feature v4.0 & 10-feature legacy)
+   // 2) Read MLModelWeights.csv (priority: EXACT -> NORM -> GLOBAL)
    g_mlLoaded    = false;
    g_mlModelSym  = "OFF";
-   g_mlFeatCount = 18;
    g_mlIntercept = 0.0;
-   g_mlMinProb   = 0.65;
-   for(int k = 0; k < 18; k++) { g_mlMean[k] = 0.0; g_mlStd[k] = 1.0; g_mlWeight[k] = 0.0; }
+   g_mlMinProb   = 0.50;
+   for(int k = 0; k < 10; k++) { g_mlMean[k] = 0.0; g_mlStd[k] = 1.0; g_mlWeight[k] = 0.0; }
 
    if(InpUseCloudMLFilter && StringLen(InpMLWeightsCSVFile) > 0 && FileIsExist(InpMLWeightsCSVFile, commonFlag))
    {
@@ -886,25 +752,22 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
                continue;
 
             int rank = 99;
-            if(p[0] == symUpper)            rank = 1;
-            else if(p[0] == normSym)        rank = 2;
-            else if(p[0] == g_detectedClass)rank = 3;
-            else if(p[0] == "GLOBAL")       rank = 4;
+            if(p[0] == symUpper)      rank = 1;
+            else if(p[0] == normSym)  rank = 2;
+            else if(p[0] == "GLOBAL") rank = 3;
 
             if(rank < bestRank)
             {
                bestRank      = rank;
-               int nFeat     = (cnt >= 57) ? 18 : 10;
                g_mlModelSym  = p[0];
-               g_mlFeatCount = nFeat;
                g_mlIntercept = StringToDouble(p[1]);
                g_mlMinProb   = MathMax(0.05, MathMin(0.95, StringToDouble(p[2])));
-               for(int k = 0; k < nFeat; k++)
+               for(int k = 0; k < 10; k++)
                {
                   g_mlMean[k]   = StringToDouble(p[3 + k]);
-                  double sVal   = StringToDouble(p[3 + nFeat + k]);
+                  double sVal   = StringToDouble(p[13 + k]);
                   g_mlStd[k]    = (MathAbs(sVal) > 1e-9) ? sVal : 1.0;
-                  g_mlWeight[k] = StringToDouble(p[3 + 2 * nFeat + k]);
+                  g_mlWeight[k] = StringToDouble(p[23 + k]);
                }
                g_mlLoaded = true;
             }
@@ -926,14 +789,7 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
          prevSw       != g_effEnSweep ||
          prevSq       != g_effEnSqueeze ||
          prevPl       != g_effEnPullback ||
-         prevSess0    != g_effSessStartUTC ||
-         prevSess1    != g_effSessEndUTC ||
-         prevHTFM     != g_effHTFMode ||
-         MathAbs(prevMacW - g_effMacroWeight) > 1e-6 ||
-         prevCD       != g_effCooldownBars ||
-         prevTag      != g_effStrategyTag ||
          prevMLLoaded != g_mlLoaded ||
-         prevMLFCount != g_mlFeatCount ||
          MathAbs(prevMLProb - g_effMLMinProb) > 1e-6 ||
          MathAbs(prevMLInt - g_mlIntercept) > 1e-6 ||
          MathAbs(prevMLW0 - g_mlWeight[0]) > 1e-6)
@@ -944,91 +800,37 @@ void RefreshCloudAdaptiveAndML(const bool forceNow)
 }
 
 //+------------------------------------------------------------------+
-//| Helpers: Bar UTC Hour & Symbol Session Window Check              |
+//| Helper: Evaluate Native Logistic ML Meta-Label Win Probability   |
 //+------------------------------------------------------------------+
-int GetBarUTCHour(const datetime barTime)
-{
-   datetime tc = TimeCurrent();
-   datetime tg = TimeGMT();
-   datetime barUtc = barTime;
-   if(tc > 0 && tg > 0)
-   {
-      long diffSec = (long)tc - (long)tg;
-      if(MathAbs((double)diffSec) <= 14.0 * 3600.0)
-      {
-         long offsetSec = (long)MathRound((double)diffSec / 900.0) * 900;
-         barUtc = (datetime)((long)barTime - offsetSec);
-      }
-   }
-   MqlDateTime dt;
-   TimeToStruct(barUtc, dt);
-   return dt.hour;
-}
-
-bool IsInSessionUTC(const int hr, const int s0, const int s1)
-{
-   if(s0 == 0 && s1 >= 24)
-      return true;
-   if(s0 < s1)
-      return (hr >= s0 && hr < s1);
-   return (hr >= s0 || hr < s1);
-}
-
-double IsLondonNYSessionUTC(const datetime barTime)
-{
-   int hr = GetBarUTCHour(barTime);
-   return (hr >= 7 && hr <= 20) ? 1.0 : 0.0;
-}
-
-//+------------------------------------------------------------------+
-//| Helper: Build & Evaluate 18-Feature Logistic ML Win Probability  |
-//+------------------------------------------------------------------+
-double EvaluateMLWinProb18(const int dir,
-                           const double ofi,
-                           const double netDelta3,
-                           const double rvol,
-                           const double vwapZ,
-                           const double ker,
-                           const int htfBias,
-                           const double clv,
-                           const double atrPct,
-                           const double fvgDispAligned,
-                           const int macroBias,
-                           const double distVwapAtr,
-                           const double riskAtr,
-                           const double bodyAtr,
-                           const double scoreNorm,
-                           const double isH1OrHigher,
-                           const double isLondonNY,
-                           const double isMulti,
-                           const double isPull)
+double EvaluateMLWinProb(const int dir,
+                         const double ofi,
+                         const double netDelta3,
+                         const double rvol,
+                         const double vwapZ,
+                         const double ker,
+                         const int htfBias,
+                         const double clv,
+                         const double atrPct,
+                         const double fvgDispAligned,
+                         const int macroBias)
 {
    if(!g_mlLoaded)
       return 1.0;
 
-   double x[18];
-   x[0]  = (double)dir * ofi;
-   x[1]  = (double)dir * netDelta3;
-   x[2]  = MathMin(rvol, 5.0);
-   x[3]  = (double)dir * vwapZ;
-   x[4]  = ker;
-   x[5]  = (double)dir * (double)htfBias;
-   x[6]  = (double)dir * clv;
-   x[7]  = atrPct / 100.0;
-   x[8]  = fvgDispAligned;
-   x[9]  = ((double)dir * (double)macroBias) / 100.0;
-   x[10] = MathMax(-6.0, MathMin(6.0, distVwapAtr));
-   x[11] = MathMax(0.5, MathMin(4.0, riskAtr));
-   x[12] = MathMax(0.0, MathMin(4.0, bodyAtr));
-   x[13] = scoreNorm;
-   x[14] = isH1OrHigher;
-   x[15] = isLondonNY;
-   x[16] = isMulti;
-   x[17] = isPull;
+   double x[10];
+   x[0] = (double)dir * ofi;
+   x[1] = (double)dir * netDelta3;
+   x[2] = MathMin(rvol, 5.0);
+   x[3] = (double)dir * vwapZ;
+   x[4] = ker;
+   x[5] = (double)dir * (double)htfBias;
+   x[6] = (double)dir * clv;
+   x[7] = atrPct / 100.0;
+   x[8] = fvgDispAligned;
+   x[9] = ((double)dir * (double)macroBias) / 100.0;
 
-   int nF = MathMin(18, MathMax(10, g_mlFeatCount));
    double z = g_mlIntercept;
-   for(int k = 0; k < nF; k++)
+   for(int k = 0; k < 10; k++)
    {
       double xNorm = (x[k] - g_mlMean[k]) / g_mlStd[k];
       z += g_mlWeight[k] * xNorm;
@@ -1281,7 +1083,6 @@ void FireSignalAlerts(const int barIdx,
 //+------------------------------------------------------------------+
 void UpdateVisualsAndStats(const int rates_total,
                            const datetime &time[],
-                           const double &open[],
                            const double &high[],
                            const double &low[],
                            const double &close[],
@@ -1291,16 +1092,15 @@ void UpdateVisualsAndStats(const int rates_total,
    if(lastClosed < g_calcStart)
       return;
 
-   int totalSignals  = 0;
-   int closedTrades  = 0;
-   int tp1Wins       = 0;
-   int tp2Wins       = 0;
-   int tp1OnlyLosses = 0;
-   int losses        = 0;
-   int openTrades    = 0;
-   int lastSigIdx    = -1;
+   int totalSignals = 0;
+   int closedTrades = 0;
+   int tp1Wins      = 0;
+   int tp2Wins      = 0;
+   int losses       = 0;
+   int openTrades   = 0;
+   int lastSigIdx   = -1;
 
-   // Causal forward-bar evaluation using strictly closed bars (Protected-Runner v3.5 & conservative SL-first)
+   // Causal forward-bar evaluation using strictly closed bars (conservative SL-first tie-breaking)
    for(int s = g_calcStart; s <= lastClosed; s++)
    {
       int dir = 0;
@@ -1318,12 +1118,10 @@ void UpdateVisualsAndStats(const int rates_total,
       if(sl == EMPTY_VALUE || tp1 == EMPTY_VALUE || tp2 == EMPTY_VALUE)
          continue;
 
-      double risk = MathAbs(entry - sl);
       bool resolved = false;
       bool hitTP1   = false;
-      int  maxBarK  = MathMin(lastClosed, s + 48);
 
-      for(int k = s + 1; k <= maxBarK; k++)
+      for(int k = s + 1; k <= lastClosed; k++)
       {
          if(dir == 1)
          {
@@ -1334,7 +1132,6 @@ void UpdateVisualsAndStats(const int rates_total,
             if(slHit)
             {
                if(!hitTP1) losses++;
-               else        tp1OnlyLosses++;
                resolved = true;
                break;
             }
@@ -1350,7 +1147,7 @@ void UpdateVisualsAndStats(const int rates_total,
             {
                tp1Wins++;
                hitTP1 = true;
-               sl = entry - 0.50 * risk;
+               sl = entry;
             }
          }
          else
@@ -1362,7 +1159,6 @@ void UpdateVisualsAndStats(const int rates_total,
             if(slHit)
             {
                if(!hitTP1) losses++;
-               else        tp1OnlyLosses++;
                resolved = true;
                break;
             }
@@ -1378,7 +1174,7 @@ void UpdateVisualsAndStats(const int rates_total,
             {
                tp1Wins++;
                hitTP1 = true;
-               sl = entry + 0.50 * risk;
+               sl = entry;
             }
          }
       }
@@ -1409,7 +1205,7 @@ void UpdateVisualsAndStats(const int rates_total,
    if(!InpShowDashboard)
       return;
 
-   int panelW = 710;
+   int panelW = 650;
    int rowCount = 7 + (InpUseExternalMacroBias ? 1 : 0);
    int panelH = 22 + rowCount * 17;
 
@@ -1434,54 +1230,53 @@ void UpdateVisualsAndStats(const int rates_total,
    int yTxt = InpDashY + 8;
    int dy   = 17;
 
-   // Row 1: Title + Detected Symbol/Class + Profile
+   // Row 1: Title
    string tfName = EnumToString(_Period);
    StringReplace(tfName, "PERIOD_", "");
-   string titleStr = StringFormat("LEADING CONFLUENCE PRO v4.00 [%s %s | %s] | Symbol-DNA [%s]", _Symbol, tfName, g_detectedClass, GetProfileName());
+   string titleStr = StringFormat("LEADING CONFLUENCE PRO v2 [%s %s] | Closed-Bar Non-Repainting", _Symbol, tfName);
    SetDashLabel(g_prefix + "R1", titleStr, xTxt, yTxt, clrWhite, 9);
    yTxt += dy;
 
-   // Row 2: Symbol DNA Playbooks, Session Window, Gate, VWAP, Cooldown & Macro Weight
-   string sessTxt = (g_effSessStartUTC == 0 && g_effSessEndUTC >= 24) ? "24/7" : StringFormat("%02d-%02dZ", g_effSessStartUTC, g_effSessEndUTC);
-   string row2 = StringFormat("DNA: %s (%s/%s/%s) | Sess %s | Gate %d+ | VWAP(%d) | CD:%d | MacW:%.2f",
-                              g_effStrategyTag,
-                              g_effEnSweep ? "Sw" : "-",
-                              g_effEnSqueeze ? "Sq" : "-",
-                              g_effEnPullback ? "Pl" : "-",
-                              sessTxt,
+   // Row 2: Active Gates + Volume Source + VWAP
+   string volMode = "Tick";
+   if(InpVolumeSource == VOL_REAL)
+      volMode = "Real";
+   else if(InpVolumeSource == VOL_AUTO && realVol[lastClosed] > 0)
+      volMode = "Real(Auto)";
+   else if(InpVolumeSource == VOL_AUTO)
+      volMode = "Tick(Auto)";
+
+   string row2 = StringFormat("Gate: %d+ (%s) | VWAP: %s(%d) | R:R 1:%.1f / 1:%.1f | Vol: %s",
                               g_effMinScore,
+                              g_cloudConfigLoaded ? "Cloud" : "Manual",
+                              (InpVWAPMode == VWAP_ROLLING) ? "Roll" : "Sess",
                               g_effVWAPPeriod,
-                              g_effCooldownBars,
-                              g_effMacroWeight);
+                              g_effTP1Mult,
+                              g_effTP2Mult,
+                              volMode);
    SetDashLabel(g_prefix + "R2", row2, xTxt, yTxt, clrLightSteelBlue, 9);
    yTxt += dy;
 
    // Row 3: Cloud ML + ATR Percentile + FVG/Displacement Status
    bool cloudSvcOk = (GlobalVariableCheck("LCP_CLOUD_STATUS") && GlobalVariableGet("LCP_CLOUD_STATUS") > 0.5);
    string svcTxt   = cloudSvcOk ? "SYNCED" : ((g_cloudConfigLoaded || g_mlLoaded) ? "LOCAL_CSV" : "DEFAULT");
-   double effMLGateHUD = MathMax(0.30, MathMin(0.92, g_effMLMinProb + GetProfileMLOffset()));
    string mlTxt    = "OFF";
    if(g_mlLoaded && lastClosed >= g_calcStart + 2)
    {
-      double atrLC   = MathMax(_Point * 2.0, g_atr[lastClosed]);
-      double rngLC   = high[lastClosed] - low[lastClosed];
-      double clvLC   = (rngLC > _Point * 0.1) ? (((close[lastClosed] - low[lastClosed]) - (high[lastClosed] - close[lastClosed])) / rngLC) : 0.0;
-      double sd3LC   = g_delta[lastClosed] + g_delta[lastClosed - 1] + g_delta[lastClosed - 2];
-      double sv3LC   = MathMax(1.0, g_effVol[lastClosed] + g_effVol[lastClosed - 1] + g_effVol[lastClosed - 2]);
-      double nd3LC   = sd3LC / sv3LC;
-      double bFvgLC  = (g_fvgDispState[lastClosed] > 0) ? 1.0 : 0.0;
-      double sFvgLC  = (g_fvgDispState[lastClosed] < 0) ? 1.0 : 0.0;
-      double distLC  = (close[lastClosed] - g_vwapVal[lastClosed]) / atrLC;
-      double bodyLC  = MathAbs(close[lastClosed] - open[lastClosed]) / atrLC;
-      double isH1LC  = (_Period >= PERIOD_H1) ? 1.0 : 0.0;
-      double isLonLC = IsLondonNYSessionUTC(time[lastClosed]);
-      double pBuyLC  = EvaluateMLWinProb18(1,  g_ofi[lastClosed], nd3LC, g_rvol[lastClosed], g_vwapZ[lastClosed], RegimeBuffer[lastClosed], g_htfBias[lastClosed], clvLC, g_atrPct[lastClosed], bFvgLC, g_cachedMacroBias,  distLC, InpMinSLATR, bodyLC, 0.70, isH1LC, isLonLC, 0.0, 0.0);
-      double pSellLC = EvaluateMLWinProb18(-1, g_ofi[lastClosed], nd3LC, g_rvol[lastClosed], g_vwapZ[lastClosed], RegimeBuffer[lastClosed], g_htfBias[lastClosed], clvLC, g_atrPct[lastClosed], sFvgLC, g_cachedMacroBias, -distLC, InpMinSLATR, bodyLC, 0.70, isH1LC, isLonLC, 0.0, 0.0);
-      mlTxt = StringFormat("ON(%s:%df >=%.1f%% | B:%.0f%% S:%.0f%%)", g_mlModelSym, g_mlFeatCount, effMLGateHUD * 100.0, pBuyLC * 100.0, pSellLC * 100.0);
+      double rngLC = high[lastClosed] - low[lastClosed];
+      double clvLC = (rngLC > _Point * 0.1) ? (((close[lastClosed] - low[lastClosed]) - (high[lastClosed] - close[lastClosed])) / rngLC) : 0.0;
+      double sd3LC = g_delta[lastClosed] + g_delta[lastClosed - 1] + g_delta[lastClosed - 2];
+      double sv3LC = MathMax(1.0, g_effVol[lastClosed] + g_effVol[lastClosed - 1] + g_effVol[lastClosed - 2]);
+      double nd3LC = sd3LC / sv3LC;
+      double bFvgLC = (g_fvgDispState[lastClosed] > 0) ? 1.0 : 0.0;
+      double sFvgLC = (g_fvgDispState[lastClosed] < 0) ? 1.0 : 0.0;
+      double pBuyLC  = EvaluateMLWinProb(1, g_ofi[lastClosed], nd3LC, g_rvol[lastClosed], g_vwapZ[lastClosed], RegimeBuffer[lastClosed], g_htfBias[lastClosed], clvLC, g_atrPct[lastClosed], bFvgLC, g_cachedMacroBias);
+      double pSellLC = EvaluateMLWinProb(-1, g_ofi[lastClosed], nd3LC, g_rvol[lastClosed], g_vwapZ[lastClosed], RegimeBuffer[lastClosed], g_htfBias[lastClosed], clvLC, g_atrPct[lastClosed], sFvgLC, g_cachedMacroBias);
+      mlTxt = StringFormat("ON(%s >=%.0f%% | B:%.0f%% S:%.0f%%)", g_mlModelSym, g_effMLMinProb * 100.0, pBuyLC * 100.0, pSellLC * 100.0);
    }
    else if(g_mlLoaded)
    {
-      mlTxt = StringFormat("ON(%s:%df >=%.1f%%)", g_mlModelSym, g_mlFeatCount, effMLGateHUD * 100.0);
+      mlTxt = StringFormat("ON(%s >=%.0f%%)", g_mlModelSym, g_effMLMinProb * 100.0);
    }
    string fvgTxt   = (g_fvgDispState[lastClosed] > 0) ? "BULL" : ((g_fvgDispState[lastClosed] < 0) ? "BEAR" : "NONE");
    color cloudClr  = (g_mlLoaded || cloudSvcOk) ? clrAqua : clrSilver;
@@ -1534,13 +1329,9 @@ void UpdateVisualsAndStats(const int rates_total,
       ObjectDelete(0, g_prefix + "RExt");
    }
 
-   // Row 7: Causal Historical Performance Stats (Protected-Runner 0.65*TP1 + 0.35*TP2 - 0.175*TP1Stop - 1.0*Loss - 0.05*closed)
+   // Row 7: Causal Historical Performance Stats
    double winPct = (closedTrades > 0) ? (100.0 * (double)tp1Wins / (double)closedTrades) : 0.0;
-   double totalR = 0.65 * g_effTP1Mult * (double)tp1Wins
-                 + 0.35 * g_effTP2Mult * (double)tp2Wins
-                 - 0.35 * 0.50 * (double)tp1OnlyLosses
-                 - 1.00 * (double)losses
-                 - 0.05 * (double)closedTrades;
+   double totalR = 0.5 * g_effTP1Mult * (double)tp1Wins + 0.5 * g_effTP2Mult * (double)tp2Wins - 1.0 * (double)losses;
    double expR   = (closedTrades > 0) ? (totalR / (double)closedTrades) : 0.0;
    color statClr = (expR > 0.0) ? clrMediumSpringGreen : ((closedTrades == 0) ? clrSilver : clrLightSalmon);
    string row5 = StringFormat("Causal Stats: %d sig (%d closed, %d open) | TP1 Win %.1f%% | TP2 %d | Exp %+.2fR",
@@ -1625,7 +1416,7 @@ int OnInit()
 
    IndicatorSetInteger(INDICATOR_DIGITS, _Digits);
    IndicatorSetString(INDICATOR_SHORTNAME,
-                      StringFormat("LeadingConfluencePro v4.0 [%s] (%d+)", g_effStrategyTag, g_effMinScore));
+                      StringFormat("LeadingConfluencePro v2 (%d+)", g_effMinScore));
 
    return INIT_SUCCEEDED;
 }
@@ -2078,10 +1869,6 @@ int OnCalculate(const int rates_total,
       if(i < g_calcStart + warmup)
          continue;
 
-      if(!(g_effSessStartUTC == 0 && g_effSessEndUTC >= 24) &&
-         !IsInSessionUTC(GetBarUTCHour(time[i]), g_effSessStartUTC, g_effSessEndUTC))
-         continue;
-
       double atr = g_atr[i];
       double barRange = high[i] - low[i];
       if(atr <= _Point * 2.0 || barRange < 0.25 * atr)
@@ -2093,8 +1880,7 @@ int OnCalculate(const int rates_total,
       if(g_atrPct[i] < 8.0 && !recentSqz)
          continue;
 
-      int effCooldown = g_cloudConfigLoaded ? g_effCooldownBars : InpMinBarsBetweenSignals;
-      if((i - g_lastSigBar[i - 1]) < effCooldown)
+      if((i - g_lastSigBar[i - 1]) < InpMinBarsBetweenSignals)
          continue;
 
       double clv = (barRange > _Point * 0.1) ? (((close[i] - low[i]) - (high[i] - close[i])) / barRange) : 0.0;
@@ -2125,12 +1911,10 @@ int OnCalculate(const int rates_total,
       int    htfBias   = g_htfBias[i];
       double z         = g_vwapZ[i];
 
-      //--- Check Playbooks (Bullish — v3.0 Regime-Matched Routing)
-      bool   rawBullSweep  = false;
-      double bullSweepExt  = low[i];
-      bool   trigBullSweep = false;
-      bool   trigBullSqz   = false;
-      bool   trigBullPull  = false;
+      //--- Check Playbooks (Bullish)
+      bool trigBullSweep = false;
+      bool trigBullSqz   = false;
+      bool trigBullPull  = false;
       double bullStructExtreme = low[i];
 
       if(g_effEnSweep && g_swLow[i - 1] > 0.0 && (i - g_swLowBar[i - 1]) <= 80)
@@ -2145,8 +1929,8 @@ int OnCalculate(const int rates_total,
             z <= 1.2 &&
             !(htfBias == -1 && ker >= 0.45))
          {
-            rawBullSweep = true;
-            bullSweepExt = sweptPrev ? MathMin(low[i], low[i - 1]) : low[i];
+            trigBullSweep = true;
+            bullStructExtreme = sweptPrev ? MathMin(low[i], low[i - 1]) : low[i];
          }
       }
 
@@ -2165,55 +1949,42 @@ int OnCalculate(const int rates_total,
             clv >= 0.35 &&
             g_ofi[i] >= 0.25 &&
             z <= 2.2 &&
-            (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == 1))
+            (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias >= 0))
          {
             trigBullSqz = true;
+            if(!trigBullSweep)
+               bullStructExtreme = MathMin(low[i], low[i - 1]);
+            else
+               bullStructExtreme = MathMin(bullStructExtreme, MathMin(low[i], low[i - 1]));
          }
       }
 
       if(g_effEnPullback)
       {
-         bool htfAlignedBull = (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == 1);
-         bool trendSupport   = htfAlignedBull && (ker >= 0.20 || vwapSlope > 0.0 || g_emaFast[i] > g_emaSlow[i]);
-         bool touchedVWAP    = (low[i] <= g_vwapVal[i] + 0.25 * atr) ||
-                               (low[i - 1] <= g_vwapVal[i - 1] + 0.25 * atr);
-         bool heldSupport    = (low[i] >= g_vwapVal[i] - 2.2 * g_vwapStd[i]);
-         bool confirmClose   = (close[i] > open[i] && close[i] > g_vwapVal[i] && clv >= 0.35 &&
-                                (close[i] > high[i - 1] || bodyOpenClose >= 0.40 * atr));
+         bool trendSupport = (InpUseHTFFilter && g_resolvedHTF != _Period && htfBias == 1) ||
+                             (ker >= 0.25 && vwapSlope > 0.0 && g_emaFast[i] > g_emaSlow[i]);
+         bool touchedVWAP  = (low[i] <= g_vwapVal[i] + 0.25 * atr) ||
+                             (low[i - 1] <= g_vwapVal[i - 1] + 0.25 * atr);
+         bool heldSupport  = (low[i] >= g_vwapVal[i] - 2.2 * g_vwapStd[i]);
+         bool confirmClose = (close[i] > open[i] && close[i] > g_vwapVal[i] && clv >= 0.35 &&
+                              (close[i] > high[i - 1] || bodyOpenClose >= 0.40 * atr));
 
          if(trendSupport && touchedVWAP && heldSupport && confirmClose &&
             g_ofi[i] >= 0.20 && g_rvol[i] >= 1.00 && z <= 1.8)
          {
             trigBullPull = true;
+            double pullMin = MathMin(low[i], low[i - 1]);
+            if(!trigBullSweep && !trigBullSqz)
+               bullStructExtreme = pullMin;
+            else
+               bullStructExtreme = MathMin(bullStructExtreme, pullMin);
          }
       }
 
-      // Standalone Sweep allowed per Symbol DNA g_effHTFMode (0=Balanced, 1=StrictTrend, 2=FlexSweep) AND QualitySweep,
-      // OR in confluence with SqzBreak/VWAPPull
-      double barBodyAtr = MathAbs(bodyOpenClose) / MathMax(atr, _Point);
-      double bSwRawRisk = MathAbs(close[i] - (bullSweepExt - g_effSLBufferATR * atr));
-      double bSwRiskAtr = MathMax(InpMinSLATR, MathMin(InpMaxSLATR, bSwRawRisk / MathMax(atr, _Point)));
-      bool   bullQualSw = (bSwRiskAtr >= 1.45 && barBodyAtr <= 0.90);
-      bool   bullSwHtfOk = (!InpUseHTFFilter || g_resolvedHTF == _Period) ||
-                           (g_effHTFMode == 2 ? true : (g_effHTFMode == 1 ? (htfBias == 1) : (htfBias == 0)));
-      trigBullSweep = rawBullSweep && (trigBullSqz || trigBullPull || (bullSwHtfOk && bullQualSw));
-      if(trigBullSweep)
-      {
-         bullStructExtreme = bullSweepExt;
-         if(trigBullSqz || trigBullPull)
-            bullStructExtreme = MathMin(bullStructExtreme, MathMin(low[i], low[i - 1]));
-      }
-      else if(trigBullSqz || trigBullPull)
-      {
-         bullStructExtreme = MathMin(low[i], low[i - 1]);
-      }
-
-      //--- Check Playbooks (Bearish — v3.6 Regime-Matched Routing)
-      bool   rawBearSweep  = false;
-      double bearSweepExt  = high[i];
-      bool   trigBearSweep = false;
-      bool   trigBearSqz   = false;
-      bool   trigBearPull  = false;
+      //--- Check Playbooks (Bearish)
+      bool trigBearSweep = false;
+      bool trigBearSqz   = false;
+      bool trigBearPull  = false;
       double bearStructExtreme = high[i];
 
       if(g_effEnSweep && g_swHigh[i - 1] > 0.0 && (i - g_swHighBar[i - 1]) <= 80)
@@ -2228,8 +1999,8 @@ int OnCalculate(const int rates_total,
             z >= -1.2 &&
             !(htfBias == 1 && ker >= 0.45))
          {
-            rawBearSweep = true;
-            bearSweepExt = sweptPrev ? MathMax(high[i], high[i - 1]) : high[i];
+            trigBearSweep = true;
+            bearStructExtreme = sweptPrev ? MathMax(high[i], high[i - 1]) : high[i];
          }
       }
 
@@ -2248,44 +2019,36 @@ int OnCalculate(const int rates_total,
             clv <= -0.35 &&
             g_ofi[i] <= -0.25 &&
             z >= -2.2 &&
-            (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == -1))
+            (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias <= 0))
          {
             trigBearSqz = true;
+            if(!trigBearSweep)
+               bearStructExtreme = MathMax(high[i], high[i - 1]);
+            else
+               bearStructExtreme = MathMax(bearStructExtreme, MathMax(high[i], high[i - 1]));
          }
       }
 
       if(g_effEnPullback)
       {
-         bool htfAlignedBear = (!InpUseHTFFilter || g_resolvedHTF == _Period || htfBias == -1);
-         bool trendSupport   = htfAlignedBear && (ker >= 0.20 || vwapSlope < 0.0 || g_emaFast[i] < g_emaSlow[i]);
-         bool touchedVWAP    = (high[i] >= g_vwapVal[i] - 0.25 * atr) ||
-                               (high[i - 1] >= g_vwapVal[i - 1] - 0.25 * atr);
-         bool heldResist     = (high[i] <= g_vwapVal[i] + 2.2 * g_vwapStd[i]);
-         bool confirmClose   = (close[i] < open[i] && close[i] < g_vwapVal[i] && clv <= -0.35 &&
-                                (close[i] < low[i - 1] || (-bodyOpenClose) >= 0.40 * atr));
+         bool trendSupport = (InpUseHTFFilter && g_resolvedHTF != _Period && htfBias == -1) ||
+                             (ker >= 0.25 && vwapSlope < 0.0 && g_emaFast[i] < g_emaSlow[i]);
+         bool touchedVWAP  = (high[i] >= g_vwapVal[i] - 0.25 * atr) ||
+                             (high[i - 1] >= g_vwapVal[i - 1] - 0.25 * atr);
+         bool heldResist   = (high[i] <= g_vwapVal[i] + 2.2 * g_vwapStd[i]);
+         bool confirmClose = (close[i] < open[i] && close[i] < g_vwapVal[i] && clv <= -0.35 &&
+                              (close[i] < low[i - 1] || (-bodyOpenClose) >= 0.40 * atr));
 
          if(trendSupport && touchedVWAP && heldResist && confirmClose &&
             g_ofi[i] <= -0.20 && g_rvol[i] >= 1.00 && z >= -1.8)
          {
             trigBearPull = true;
+            double pullMax = MathMax(high[i], high[i - 1]);
+            if(!trigBearSweep && !trigBearSqz)
+               bearStructExtreme = pullMax;
+            else
+               bearStructExtreme = MathMax(bearStructExtreme, pullMax);
          }
-      }
-
-      double sSwRawRisk = MathAbs((bearSweepExt + g_effSLBufferATR * atr) - close[i]);
-      double sSwRiskAtr = MathMax(InpMinSLATR, MathMin(InpMaxSLATR, sSwRawRisk / MathMax(atr, _Point)));
-      bool   bearQualSw = (sSwRiskAtr >= 1.45 && barBodyAtr <= 0.90);
-      bool   bearSwHtfOk = (!InpUseHTFFilter || g_resolvedHTF == _Period) ||
-                           (g_effHTFMode == 2 ? true : (g_effHTFMode == 1 ? (htfBias == -1) : (htfBias == 0)));
-      trigBearSweep = rawBearSweep && (trigBearSqz || trigBearPull || (bearSwHtfOk && bearQualSw));
-      if(trigBearSweep)
-      {
-         bearStructExtreme = bearSweepExt;
-         if(trigBearSqz || trigBearPull)
-            bearStructExtreme = MathMax(bearStructExtreme, MathMax(high[i], high[i - 1]));
-      }
-      else if(trigBearSqz || trigBearPull)
-      {
-         bearStructExtreme = MathMax(high[i], high[i - 1]);
       }
 
       //--- Calculate 100-Point Confluence Score (Bullish)
@@ -2347,8 +2110,8 @@ int OnCalculate(const int rates_total,
          {
             if(InpMacroHardVeto && g_cachedMacroBias <= -50)
                bullScore = 0;
-            else if(g_effMacroWeight > 0.001)
-               bullScore += (int)MathRound(g_effMacroWeight * (double)g_cachedMacroBias);
+            else
+               bullScore += (int)MathRound(0.15 * (double)g_cachedMacroBias);
          }
          bullScore = MathMax(0, MathMin(100, bullScore));
       }
@@ -2412,8 +2175,8 @@ int OnCalculate(const int rates_total,
          {
             if(InpMacroHardVeto && g_cachedMacroBias >= 50)
                bearScore = 0;
-            else if(g_effMacroWeight > 0.001)
-               bearScore -= (int)MathRound(g_effMacroWeight * (double)g_cachedMacroBias);
+            else
+               bearScore -= (int)MathRound(0.15 * (double)g_cachedMacroBias);
          }
          bearScore = MathMax(0, MathMin(100, bearScore));
       }
@@ -2424,38 +2187,18 @@ int OnCalculate(const int rates_total,
       bool buyValid  = (bullScore >= minScore && allowBuy);
       bool sellValid = (bearScore >= minScore && allowSell);
 
-      double entryP   = close[i];
-      double minRisk  = InpMinSLATR * atr;
-      double maxRisk  = InpMaxSLATR * atr;
-      double rawBRisk = MathAbs(entryP - (bullStructExtreme - g_effSLBufferATR * atr));
-      double rawSRisk = MathAbs((bearStructExtreme + g_effSLBufferATR * atr) - entryP);
-      double bullRisk = MathMax(minRisk, MathMin(maxRisk, rawBRisk));
-      double bearRisk = MathMax(minRisk, MathMin(maxRisk, rawSRisk));
-
-      double distVwapAtr = (entryP - g_vwapVal[i]) / MathMax(atr, _Point);
-      double bodyAtr     = MathAbs(entryP - open[i]) / MathMax(atr, _Point);
-      double isH1OrHigh  = (_Period >= PERIOD_H1) ? 1.0 : 0.0;
-      double isLonNY     = IsLondonNYSessionUTC(time[i]);
-
       double bullProb = 0.0;
       double bearProb = 0.0;
-      double effMLGate = MathMax(0.30, MathMin(0.92, g_effMLMinProb + GetProfileMLOffset()));
       if(buyValid && InpUseCloudMLFilter && g_mlLoaded)
       {
-         double bRiskAtr = bullRisk / MathMax(atr, _Point);
-         double bIsMulti = (bullPB == PB_MULTI) ? 1.0 : 0.0;
-         double bIsPull  = (bullPB == PB_VWAP_PULL) ? 1.0 : 0.0;
-         bullProb = EvaluateMLWinProb18(1, g_ofi[i], netDelta3, g_rvol[i], z, ker, htfBias, clv, g_atrPct[i], bullFvgDisp, g_cachedMacroBias, distVwapAtr, bRiskAtr, bodyAtr, (double)bullScore / 100.0, isH1OrHigh, isLonNY, bIsMulti, bIsPull);
-         if(bullProb < effMLGate)
+         bullProb = EvaluateMLWinProb(1, g_ofi[i], netDelta3, g_rvol[i], z, ker, htfBias, clv, g_atrPct[i], bullFvgDisp, g_cachedMacroBias);
+         if(bullProb < g_effMLMinProb)
             buyValid = false;
       }
       if(sellValid && InpUseCloudMLFilter && g_mlLoaded)
       {
-         double sRiskAtr = bearRisk / MathMax(atr, _Point);
-         double sIsMulti = (bearPB == PB_MULTI) ? 1.0 : 0.0;
-         double sIsPull  = (bearPB == PB_VWAP_PULL) ? 1.0 : 0.0;
-         bearProb = EvaluateMLWinProb18(-1, g_ofi[i], netDelta3, g_rvol[i], z, ker, htfBias, clv, g_atrPct[i], bearFvgDisp, g_cachedMacroBias, -distVwapAtr, sRiskAtr, bodyAtr, (double)bearScore / 100.0, isH1OrHigh, isLonNY, sIsMulti, sIsPull);
-         if(bearProb < effMLGate)
+         bearProb = EvaluateMLWinProb(-1, g_ofi[i], netDelta3, g_rvol[i], z, ker, htfBias, clv, g_atrPct[i], bearFvgDisp, g_cachedMacroBias);
+         if(bearProb < g_effMLMinProb)
             sellValid = false;
       }
 
@@ -2472,11 +2215,17 @@ int OnCalculate(const int rates_total,
 
       if(finalDir == 1)
       {
+         double entry   = close[i];
+         double rawRisk = MathAbs(entry - (bullStructExtreme - g_effSLBufferATR * atr));
+         double minRisk = InpMinSLATR * atr;
+         double maxRisk = InpMaxSLATR * atr;
+         double risk    = MathMax(minRisk, MathMin(maxRisk, rawRisk));
+
          BuySignalBuffer[i] = low[i] - 0.35 * atr;
          ScoreBuffer[i]     = (double)bullScore;
-         SLBuffer[i]        = NormalizeDouble(entryP - bullRisk, _Digits);
-         TP1Buffer[i]       = NormalizeDouble(entryP + g_effTP1Mult * bullRisk, _Digits);
-         TP2Buffer[i]       = NormalizeDouble(entryP + g_effTP2Mult * bullRisk, _Digits);
+         SLBuffer[i]        = NormalizeDouble(entry - risk, _Digits);
+         TP1Buffer[i]       = NormalizeDouble(entry + g_effTP1Mult * risk, _Digits);
+         TP2Buffer[i]       = NormalizeDouble(entry + g_effTP2Mult * risk, _Digits);
          MLProbBuffer[i]    = (InpUseCloudMLFilter && g_mlLoaded) ? bullProb : 0.0;
          g_sigPlaybook[i]   = bullPB;
 
@@ -2487,11 +2236,17 @@ int OnCalculate(const int rates_total,
       }
       else if(finalDir == -1)
       {
+         double entry   = close[i];
+         double rawRisk = MathAbs((bearStructExtreme + g_effSLBufferATR * atr) - entry);
+         double minRisk = InpMinSLATR * atr;
+         double maxRisk = InpMaxSLATR * atr;
+         double risk    = MathMax(minRisk, MathMin(maxRisk, rawRisk));
+
          SellSignalBuffer[i] = high[i] + 0.35 * atr;
          ScoreBuffer[i]      = -(double)bearScore;
-         SLBuffer[i]         = NormalizeDouble(entryP + bearRisk, _Digits);
-         TP1Buffer[i]        = NormalizeDouble(entryP - g_effTP1Mult * bearRisk, _Digits);
-         TP2Buffer[i]        = NormalizeDouble(entryP - g_effTP2Mult * bearRisk, _Digits);
+         SLBuffer[i]         = NormalizeDouble(entry + risk, _Digits);
+         TP1Buffer[i]        = NormalizeDouble(entry - g_effTP1Mult * risk, _Digits);
+         TP2Buffer[i]        = NormalizeDouble(entry - g_effTP2Mult * risk, _Digits);
          MLProbBuffer[i]     = (InpUseCloudMLFilter && g_mlLoaded) ? bearProb : 0.0;
          g_sigPlaybook[i]    = bearPB;
 
@@ -2517,7 +2272,7 @@ int OnCalculate(const int rates_total,
    //--- Update Causal Historical Stats & Dashboard HUD
    if(fullRecalc || rates_total != g_lastVisualRatesTotal || g_cachedMacroBias != g_lastVisualMacroBias)
    {
-      UpdateVisualsAndStats(rates_total, time, open, high, low, close, volume);
+      UpdateVisualsAndStats(rates_total, time, high, low, close, volume);
       g_lastVisualRatesTotal = rates_total;
       g_lastVisualMacroBias  = g_cachedMacroBias;
    }

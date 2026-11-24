@@ -1,10 +1,10 @@
 """
-Exact Causal Python Mirror of LeadingConfluencePro v3.50 Feature & Signal Engine.
+Exact Causal Python Mirror of LeadingConfluencePro v2.00 Feature & Signal Engine.
 Zero look-ahead:
   - Swing pivots confirm strictly at i = p + pivot_right
   - Higher-timeframe bias aligns strictly on completed HTF close timestamps
   - Signal evaluation uses only bars <= N - 2 (or evaluates closed bar index i)
-  - Computes 18 standardized directional ML meta-features [f0..f17]
+  - Computes 10 standardized directional ML meta-features [f0..f9]
 """
 
 from __future__ import annotations
@@ -16,31 +16,10 @@ import numpy as np
 import pandas as pd
 from scipy.special import ndtr
 
-FEATURE_NAMES_18: List[str] = [
-    "ofi_aligned",
-    "net_delta3_aligned",
-    "rvol_capped",
-    "vwap_z_aligned",
-    "ker",
-    "htf_bias_aligned",
-    "clv_aligned",
-    "atr_pct",
-    "fvg_disp_aligned",
-    "macro_bias_aligned",
-    "dist_vwap_atr",
-    "risk_atr",
-    "body_atr",
-    "score_norm",
-    "is_h1_or_higher",
-    "is_london_ny",
-    "is_multi",
-    "is_pull",
-]
-
 
 @dataclass
 class EngineParams:
-    min_score: int = 65
+    min_score: int = 68
     vwap_period: int = 50
     vwap_band_mult: float = 2.0
     vol_period: int = 20
@@ -52,31 +31,19 @@ class EngineParams:
     ker_period: int = 14
     pivot_left: int = 5
     pivot_right: int = 3
-    cooldown_bars: int = 4
-    allow_consecutive: bool = True
+    cooldown_bars: int = 6
+    allow_consecutive: bool = False
     en_sweep: bool = True
     en_squeeze: bool = True
     en_pullback: bool = True
     en_fvg_disp: bool = True
     use_htf: bool = True
     sl_buffer_atr: float = 0.25
-    min_sl_atr: float = 1.10
+    min_sl_atr: float = 0.80
     max_sl_atr: float = 2.50
-    tp1_mult: float = 0.50
-    tp2_mult: float = 3.00
+    tp1_mult: float = 1.5
+    tp2_mult: float = 2.5
     macro_hard_veto: bool = False
-    sess_start_utc: int = 0
-    sess_end_utc: int = 24
-    htf_mode: int = 0        # 0=Balanced, 1=StrictTrend, 2=FlexSweep
-    macro_weight: float = 0.15
-
-
-def in_utc_session(hour_utc: int, sess_start: int, sess_end: int) -> bool:
-    if sess_start == 0 and sess_end >= 24:
-        return True
-    if sess_start < sess_end:
-        return sess_start <= hour_utc < sess_end
-    return hour_utc >= sess_start or hour_utc < sess_end
 
 
 def resample_htf(df: pd.DataFrame, tf: str) -> Tuple[pd.DataFrame, int]:
@@ -340,8 +307,6 @@ def compute_indicators_and_candidates(
     last_sig_dir = 0
     buy_reset = 1
     sell_reset = 1
-    bar_hours = pd.to_datetime(times, utc=True).hour
-    sess_all = (params.sess_start_utc == 0 and params.sess_end_utc >= 24)
 
     eval_end = n if include_last_bar else max(1, n - 1)
     for i in range(1, eval_end):
@@ -351,9 +316,6 @@ def compute_indicators_and_candidates(
             sell_reset = 1
 
         if i < warmup:
-            continue
-
-        if not sess_all and not in_utc_session(int(bar_hours[i]), params.sess_start_utc, params.sess_end_utc):
             continue
 
         at = atr[i]
@@ -395,9 +357,8 @@ def compute_indicators_and_candidates(
         z = vwap_z[i]
         mb = float(macro_arr[i])
 
-        # Bullish Playbooks (Regime-Matched v3.0 Routing)
-        raw_b_sw = False
-        b_sw_ext = l[i]
+        # Bullish Playbooks
+        trig_b_sw = False
         trig_b_sq = False
         trig_b_pl = False
         b_ext = l[i]
@@ -414,8 +375,8 @@ def compute_indicators_and_candidates(
                 and z <= 1.2
                 and not (htf_b == -1 and ker >= 0.45)
             ):
-                raw_b_sw = True
-                b_sw_ext = min(l[i], l[i - 1]) if sw_prv else l[i]
+                trig_b_sw = True
+                b_ext = min(l[i], l[i - 1]) if sw_prv else l[i]
 
         if params.en_squeeze:
             max_h5 = float(np.max(h[i - 5 : i]))
@@ -430,13 +391,14 @@ def compute_indicators_and_candidates(
                 and clv_i >= 0.35
                 and ofi[i] >= 0.25
                 and z <= 2.2
-                and (not params.use_htf or htf_b == 1)
+                and (not params.use_htf or htf_b >= 0)
             ):
                 trig_b_sq = True
+                b_ext = min(l[i], l[i - 1]) if not trig_b_sw else min(b_ext, min(l[i], l[i - 1]))
 
         if params.en_pullback:
-            trend_sup = (not params.use_htf or htf_b == 1) and (
-                ker >= 0.20 or vwap_slope > 0.0 or ema_fast[i] > ema_slow[i]
+            trend_sup = (params.use_htf and htf_b == 1) or (
+                ker >= 0.25 and vwap_slope > 0.0 and ema_fast[i] > ema_slow[i]
             )
             touched = (l[i] <= vwap_val[i] + 0.25 * at) or (l[i - 1] <= vwap_val[i - 1] + 0.25 * at)
             held = l[i] >= vwap_val[i] - 2.2 * vwap_std[i]
@@ -445,26 +407,11 @@ def compute_indicators_and_candidates(
             )
             if trend_sup and touched and held and conf_c and ofi[i] >= 0.20 and rvol[i] >= 1.00 and z <= 1.8:
                 trig_b_pl = True
+                p_min = min(l[i], l[i - 1])
+                b_ext = p_min if (not trig_b_sw and not trig_b_sq) else min(b_ext, p_min)
 
-        # Standalone Sweep allowed per Symbol DNA htf_mode (0=Balanced, 1=StrictTrend, 2=FlexSweep) AND QualitySweep,
-        # OR in confluence with SqzBreak/VWAPPull
-        body_atr_i = abs(body) / max(at, 1e-9)
-        b_sw_raw_risk = abs(c[i] - (b_sw_ext - params.sl_buffer_atr * at))
-        b_sw_risk_atr = max(params.min_sl_atr, min(params.max_sl_atr, b_sw_raw_risk / max(at, 1e-9)))
-        b_qual_sw = (b_sw_risk_atr >= 1.45) and (body_atr_i <= 0.90)
-        b_sw_htf_ok = (not params.use_htf) or (True if params.htf_mode == 2 else ((htf_b == 1) if params.htf_mode == 1 else (htf_b == 0)))
-        trig_b_sw = raw_b_sw and (trig_b_sq or trig_b_pl or (b_sw_htf_ok and b_qual_sw))
-        b_exts = []
-        if trig_b_sw:
-            b_exts.append(b_sw_ext)
-        if trig_b_sq or trig_b_pl:
-            b_exts.append(min(l[i], l[i - 1]))
-        if b_exts:
-            b_ext = min(b_exts)
-
-        # Bearish Playbooks (Regime-Matched v3.6 Routing)
-        raw_s_sw = False
-        s_sw_ext = h[i]
+        # Bearish Playbooks
+        trig_s_sw = False
         trig_s_sq = False
         trig_s_pl = False
         s_ext = h[i]
@@ -481,8 +428,8 @@ def compute_indicators_and_candidates(
                 and z >= -1.2
                 and not (htf_b == 1 and ker >= 0.45)
             ):
-                raw_s_sw = True
-                s_sw_ext = max(h[i], h[i - 1]) if sw_prv else h[i]
+                trig_s_sw = True
+                s_ext = max(h[i], h[i - 1]) if sw_prv else h[i]
 
         if params.en_squeeze:
             min_l5 = float(np.min(l[i - 5 : i]))
@@ -497,13 +444,14 @@ def compute_indicators_and_candidates(
                 and clv_i <= -0.35
                 and ofi[i] <= -0.25
                 and z >= -2.2
-                and (not params.use_htf or htf_b == -1)
+                and (not params.use_htf or htf_b <= 0)
             ):
                 trig_s_sq = True
+                s_ext = max(h[i], h[i - 1]) if not trig_s_sw else max(s_ext, max(h[i], h[i - 1]))
 
         if params.en_pullback:
-            trend_sup = (not params.use_htf or htf_b == -1) and (
-                ker >= 0.20 or vwap_slope < 0.0 or ema_fast[i] < ema_slow[i]
+            trend_sup = (params.use_htf and htf_b == -1) or (
+                ker >= 0.25 and vwap_slope < 0.0 and ema_fast[i] < ema_slow[i]
             )
             touched = (h[i] >= vwap_val[i] - 0.25 * at) or (h[i - 1] >= vwap_val[i - 1] - 0.25 * at)
             held = h[i] <= vwap_val[i] + 2.2 * vwap_std[i]
@@ -512,19 +460,8 @@ def compute_indicators_and_candidates(
             )
             if trend_sup and touched and held and conf_c and ofi[i] <= -0.20 and rvol[i] >= 1.00 and z >= -1.8:
                 trig_s_pl = True
-
-        s_sw_raw_risk = abs((s_sw_ext + params.sl_buffer_atr * at) - c[i])
-        s_sw_risk_atr = max(params.min_sl_atr, min(params.max_sl_atr, s_sw_raw_risk / max(at, 1e-9)))
-        s_qual_sw = (s_sw_risk_atr >= 1.45) and (body_atr_i <= 0.90)
-        s_sw_htf_ok = (not params.use_htf) or (True if params.htf_mode == 2 else ((htf_b == -1) if params.htf_mode == 1 else (htf_b == 0)))
-        trig_s_sw = raw_s_sw and (trig_s_sq or trig_s_pl or (s_sw_htf_ok and s_qual_sw))
-        s_exts = []
-        if trig_s_sw:
-            s_exts.append(s_sw_ext)
-        if trig_s_sq or trig_s_pl:
-            s_exts.append(max(h[i], h[i - 1]))
-        if s_exts:
-            s_ext = max(s_exts)
+                p_max = max(h[i], h[i - 1])
+                s_ext = p_max if (not trig_s_sw and not trig_s_sq) else max(s_ext, p_max)
 
         # Bull Score
         b_score = 0
@@ -565,8 +502,8 @@ def compute_indicators_and_candidates(
             if use_macro_score:
                 if params.macro_hard_veto and mb <= -50.0:
                     b_score = 0
-                elif params.macro_weight > 0.0:
-                    b_score += int(round(params.macro_weight * mb))
+                else:
+                    b_score += int(round(0.15 * mb))
             b_score = max(0, min(100, b_score))
 
         # Bear Score
@@ -608,8 +545,8 @@ def compute_indicators_and_candidates(
             if use_macro_score:
                 if params.macro_hard_veto and mb >= 50.0:
                     s_score = 0
-                elif params.macro_weight > 0.0:
-                    s_score -= int(round(params.macro_weight * mb))
+                else:
+                    s_score -= int(round(0.15 * mb))
             s_score = max(0, min(100, s_score))
 
         allow_buy = params.allow_consecutive or (last_sig_dir != 1) or (buy_reset == 1)
@@ -653,8 +590,7 @@ def compute_indicators_and_candidates(
             last_sig_bar = i
             last_sig_dir = final_dir
 
-            # Exact 18 directional ML features matching LeadingConfluencePro.mq5 v3.50
-            ts_i = pd.Timestamp(times[i])
+            # Exact 10 directional ML features matching LeadingConfluencePro.mq5 v2.00
             feat = [
                 float(final_dir * ofi[i]),
                 float(final_dir * net_delta3),
@@ -666,19 +602,11 @@ def compute_indicators_and_candidates(
                 float(atr_pct[i] / 100.0),
                 float(fvg_disp_aligned),
                 float((final_dir * mb) / 100.0),
-                float(np.clip(final_dir * ((c[i] - vwap_val[i]) / max(at, 1e-9)), -6.0, 6.0)),
-                float(np.clip(risk / max(at, 1e-9), 0.5, 4.0)),
-                float(np.clip(abs(c[i] - o[i]) / max(at, 1e-9), 0.0, 4.0)),
-                float(score_val / 100.0),
-                1.0 if base_tf in ("1h", "4h", "1d") else 0.0,
-                1.0 if (7 <= ts_i.hour <= 20) else 0.0,
-                1.0 if pb_name == "MultiConf" else 0.0,
-                1.0 if pb_name == "VWAPPull" else 0.0,
             ]
             candidates.append(
                 {
                     "bar_idx": i,
-                    "time": ts_i,
+                    "time": pd.Timestamp(times[i]),
                     "dir": final_dir,
                     "playbook": pb_name,
                     "score": score_val,
@@ -686,7 +614,6 @@ def compute_indicators_and_candidates(
                     "sl": sl,
                     "tp1": tp1,
                     "tp2": tp2,
-                    "risk": float(risk),
                     "features": feat,
                 }
             )

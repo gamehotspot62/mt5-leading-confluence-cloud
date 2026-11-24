@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LeadingConfluencePro v4.0 — Auto-Symbol DNA &amp; Dedicated Per-Symbol ML</title>
+  <title>LeadingConfluencePro — 24/7 Cloud Macro & ML Dashboard</title>
   <style>
     :root {
       --bg: #0b0f17;
@@ -71,7 +71,6 @@
     .pill-bull { background: rgba(46,229,157,0.14); color: var(--green); }
     .pill-bear { background: rgba(255,92,114,0.14); color: var(--red); }
     .pill-warn { background: rgba(245,185,66,0.14); color: var(--gold); }
-    .pill-info { background: rgba(78,168,255,0.14); color: var(--blue); }
     table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
     th, td { padding: 9px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
     th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; }
@@ -98,7 +97,7 @@
   <div class="container">
     <header>
       <div>
-        <h1>LeadingConfluencePro v4.0 — Auto-Symbol DNA &amp; Dedicated Per-Symbol ML</h1>
+        <h1>LeadingConfluencePro v2.02 — 24/7 Cloud Quant & ML Intelligence</h1>
         <div class="subtitle" id="timestamps">Loading cloud telemetry...</div>
         <div id="sessionStrip" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;font-size:0.75rem;"></div>
       </div>
@@ -120,7 +119,7 @@
     </div>
 
     <div class="section">
-      <h2>Cross-Asset Watchlist — Live M15 Microstructure + Symbol DNA + Macro / ETF / COT Matrix</h2>
+      <h2>Cross-Asset Watchlist — Live M15 Microstructure + Macro / On-Chain / ETF / COT Matrix</h2>
       <div id="marketNotice" style="display:none;margin-bottom:12px;padding:10px 14px;border-radius:8px;background:rgba(245,185,66,0.10);border:1px solid rgba(245,185,66,0.35);color:var(--gold);font-size:0.84rem;"></div>
       <table>
         <thead>
@@ -139,9 +138,8 @@
             <th title="100-bar ATR volatility percentile [0..100%]">ATR Pct</th>
             <th title="Causal Higher-Timeframe (H1) bias">HTF</th>
             <th title="Bollinger inside Keltner Volatility Squeeze">Sqz</th>
-            <th title="Symbol-Specific ML win probability (BUY% / SELL%) vs active Gate">ML Win% (B / S)</th>
-            <th title="Symbol-specific Strategy DNA archetype &amp; active UTC session">DNA / Session</th>
-            <th title="Live setup readiness &amp; minimum Confluence Score gate">Setup / Gate</th>
+            <th title="Live closed-bar ML net-profit win probability (BUY% / SELL%) vs active ML Gate">ML Win% (B / S)</th>
+            <th title="Live setup readiness & minimum Confluence Score gate">Setup / Gate</th>
           </tr>
         </thead>
         <tbody id="telemetryBody"></tbody>
@@ -150,37 +148,18 @@
 
     <div class="two-col">
       <div class="section">
-        <h2>Cloud ML Meta-Model Audit (1-Year Purged Walk-Forward OOS)</h2>
+        <h2>Cloud ML Meta-Model Audit (Purged Walk-Forward OOS)</h2>
         <div id="mlSummary">Loading ML report...</div>
-        <div id="playbookStats" style="margin-top:12px;"></div>
         <div id="featWeights" style="margin-top:14px;"></div>
       </div>
       <div class="section">
-        <h2>Cloud Walk-Forward Symbol-DNA Configs</h2>
+        <h2>Cloud Walk-Forward Optimized Configs</h2>
         <table>
           <thead>
-            <tr><th>Symbol</th><th>TF</th><th>DNA / Sess</th><th>Score</th><th>VWAP</th><th>Playbooks</th><th>MacW</th><th>TP1/TP2</th><th>OOS Win%</th><th>OOS Exp(R)</th><th>PF</th><th>Status</th></tr>
+            <tr><th>Symbol</th><th>TF</th><th>Score</th><th>VWAP</th><th>TP1/TP2</th><th>OOS Win%</th><th>OOS Exp(R)</th><th>Status</th></tr>
           </thead>
           <tbody id="cfgBody"></tbody>
         </table>
-      </div>
-    </div>
-
-    <div class="section">
-      <h2>Dedicated Per-Symbol Empirical-Bayes ML Models &amp; Top Feature Drivers (10 Unique Models)</h2>
-      <div id="symMlTable" class="neu">Loading per-symbol ML models...</div>
-    </div>
-
-    <div class="two-col">
-      <div class="section">
-        <h2>Live Signal Outcome Ledger (Protected-Runner Auto-Grader)</h2>
-        <div id="liveAuditSummary">Loading live outcome audit...</div>
-        <div id="liveAuditTable" style="margin-top:12px;"></div>
-      </div>
-      <div class="section">
-        <h2>Self-Evolving ML History (Daily 1Y Roll + Champion/Challenger)</h2>
-        <div id="evoSummary" style="margin-bottom:10px;">Loading evolution log...</div>
-        <div id="evoTable"></div>
       </div>
     </div>
 
@@ -201,7 +180,7 @@
           <tr><td><strong>VWAP-Z</strong></td><td class="pos">Pullback &le; +1.8, Sweep &le; +1.2</td><td class="neg">Pullback &ge; -1.8, Sweep &ge; -1.2</td><td>Anti-FOMO guard blocking late chasing beyond &plusmn;2.2&sigma;</td></tr>
           <tr><td><strong>KER (0.00..1.00)</strong></td><td colspan="2" class="neu">&lt; 0.22 favors Sweep reversals; &ge; 0.28 favors Squeeze &amp; Pullback</td><td>Matches strategy to Chop vs Balanced vs Trending market regime</td></tr>
           <tr><td><strong>HTF (H1)</strong></td><td class="pos">BULL (+1)</td><td class="neg">BEAR (-1)</td><td>Squeeze blocks counter-HTF entries; Pullback prefers HTF alignment</td></tr>
-          <tr><td><strong>Score &amp; ML %</strong></td><td colspan="2" class="neu">Score &ge; Gate (e.g. 65+) AND ML Prob &ge; ML Gate (1Y 18-Feature &ge;70% Win Tier)</td><td>Protected-Runner TP1 (0.50R, 65% close + -0.50R runner SL) &rarr; TP2 (3.00R)</td></tr>
+          <tr><td><strong>Score &amp; ML %</strong></td><td colspan="2" class="neu">Score &ge; Gate (e.g. 65+) AND ML Prob &ge; ML Gate (e.g. 35–48%+)</td><td>Highest conviction when Score &ge; 75, ML % &ge; 50%, and Macro aligns</td></tr>
         </tbody>
       </table>
     </div>
@@ -220,7 +199,6 @@
       macro: null,
       signals: null,
       ml: null,
-      evolution: null,
       refSha: "—",
       checkedLocal: "—",
       liveMicro: {},
@@ -252,30 +230,11 @@
       return 0.5 * (1.0 + erfApprox(x / Math.SQRT2));
     }
 
-    function detectAssetClassJS(sym) {
-      const u = String(sym || "").toUpperCase();
-      if (u.includes("XAU") || u.includes("XAG")) return "CLASS_METALS";
-      if (u.includes("BTC") || u.includes("ETH")) return "CLASS_CRYPTO";
-      if (u.includes("OIL") || u.includes("WTI")) return "CLASS_ENERGY";
-      if (u.includes("US500") || u.includes("US100") || u.includes("US30") || u.includes("SPX") || u.includes("NAS")) return "CLASS_INDEX";
-      return "CLASS_FX";
-    }
-
-    function inUtcSessionJS(hr, s0, s1) {
-      if (s0 === 0 && s1 >= 24) return true;
-      if (s0 < s1) return hr >= s0 && hr < s1;
-      return hr >= s0 || hr < s1;
-    }
-
     function getSymConfig(sym, tfName) {
       const cfgs = liveState.ml?.optimized_configs || [];
-      const u = String(sym || "").toUpperCase();
-      const clsKey = detectAssetClassJS(u);
       return (
-        cfgs.find(c => String(c.SYMBOL).toUpperCase() === u && String(c.TIMEFRAME).toUpperCase() === tfName) ||
-        cfgs.find(c => String(c.SYMBOL).toUpperCase() === u && String(c.TIMEFRAME).toUpperCase() === "M15") ||
-        cfgs.find(c => String(c.SYMBOL).toUpperCase() === u && String(c.TIMEFRAME).toUpperCase() === "ALL") ||
-        cfgs.find(c => String(c.SYMBOL).toUpperCase() === clsKey && String(c.TIMEFRAME).toUpperCase() === "ALL") ||
+        cfgs.find(c => String(c.SYMBOL).toUpperCase() === sym && String(c.TIMEFRAME).toUpperCase() === tfName) ||
+        cfgs.find(c => String(c.SYMBOL).toUpperCase() === sym && String(c.TIMEFRAME).toUpperCase() === "M15") ||
         cfgs.find(c => String(c.SYMBOL).toUpperCase() === "GLOBAL" && String(c.TIMEFRAME).toUpperCase() === "ALL") ||
         null
       );
@@ -283,16 +242,14 @@
 
     function getResolvedMLModel(sym) {
       const models = liveState.ml?.ml_models;
-      const u = String(sym || "").toUpperCase();
-      if (models) return models[u] || models[detectAssetClassJS(u)] || models.GLOBAL || null;
+      if (models) return models[sym] || models.GLOBAL || null;
       return null;
     }
 
     function evalMLProbJS(model, feats) {
       if (!model || !Array.isArray(model.weights) || model.weights.length < 10) return null;
-      const n = Math.min(feats.length, model.weights.length, model.means?.length || 0, model.stds?.length || 0);
       let z = Number(model.intercept) || 0.0;
-      for (let k = 0; k < n; k++) {
+      for (let k = 0; k < 10; k++) {
         const m = Number(model.means?.[k]) || 0.0;
         const rawS = Number(model.stds?.[k]);
         const s = Math.abs(rawS) > 1e-9 ? rawS : 1.0;
@@ -305,16 +262,9 @@
 
     function signalGrade(score, mlProb, mlThresh, direction, macroBias) {
       const macroAligned = (direction === "BUY" && macroBias >= 15) || (direction === "SELL" && macroBias <= -15);
-      if (score >= 76 && (mlProb == null || mlProb >= mlThresh + 0.035) && macroAligned) return "A+";
-      if (score >= 72 && (mlProb == null || mlProb >= mlThresh + 0.015)) return "A";
+      if (score >= 80 && (mlProb == null || mlProb >= mlThresh + 0.05) && macroAligned) return "A+";
+      if (score >= 72 && (mlProb == null || mlProb >= mlThresh + 0.02)) return "A";
       return "B";
-    }
-
-    function suggestedRiskPctJS(grade, oosExpR, mlProb, mlThresh) {
-      let base = grade === "A+" ? 1.00 : (grade === "A" ? 0.75 : 0.50);
-      if (oosExpR >= 0.08 && (mlProb == null || mlProb >= mlThresh + 0.05)) base += 0.25;
-      else if (oosExpR <= 0.0) base *= 0.50;
-      return Number(Math.max(0.25, Math.min(1.25, base)).toFixed(2));
     }
 
     function resampleH1ToH4(bars1h, nowMs) {
@@ -381,28 +331,18 @@
       const n = bars.length;
       if (n < 90) return { telemetry: null, signals: [] };
 
-      const minScore = Number(cfg?.MIN_SCORE) || 65;
+      const minScore = Number(cfg?.MIN_SCORE) || 68;
       const vwapPeriod = Math.max(5, Number(cfg?.VWAP_PERIOD) || 50);
       const slBufAtr = Number(cfg?.SL_BUFFER_ATR) || 0.25;
-      const tp1Mult = Number(cfg?.TP1_MULT) || 0.50;
-      const tp2Mult = Number(cfg?.TP2_MULT) || 3.00;
-      const oosExpR = Number(cfg?.OOS_EXP_R) || 0.0;
-      const wfStatus = cfg?.STATUS || "GLOBAL_MODEL";
+      const tp1Mult = Number(cfg?.TP1_MULT) || 1.5;
+      const tp2Mult = Number(cfg?.TP2_MULT) || 2.5;
       const enSweep = cfg ? (Number(cfg.EN_SWEEP) !== 0) : true;
       const enSqueeze = cfg ? (Number(cfg.EN_SQUEEZE) !== 0) : true;
       const enPullback = cfg ? (Number(cfg.EN_PULLBACK) !== 0) : true;
-      const mlThresh = Number(cfg?.ML_MIN_PROB) || Number(mlModel?.ml_min_prob) || 0.65;
-      const sessStart = (cfg?.SESS_START_UTC != null) ? Number(cfg.SESS_START_UTC) : 0;
-      const sessEnd = (cfg?.SESS_END_UTC != null) ? Number(cfg.SESS_END_UTC) : 24;
-      const htfMode = (cfg?.HTF_MODE != null) ? Number(cfg.HTF_MODE) : 0;
-      const macroWeight = (cfg?.MACRO_WEIGHT != null) ? Number(cfg.MACRO_WEIGHT) : 0.15;
-      const strategyTag = cfg?.STRATEGY_TAG || "ALL_24H";
-      const sessLabel = (sessStart === 0 && sessEnd >= 24) ? "24/7" : `${String(sessStart).padStart(2, "0")}-${String(sessEnd).padStart(2, "0")}Z`;
-      const mlModelTag = liveState.ml?.symbol_models?.[sym]?.model_tag || "GLOBAL";
+      const mlThresh = Number(cfg?.ML_MIN_PROB) || Number(mlModel?.ml_min_prob) || 0.50;
 
       const atrPeriod = 14, volPeriod = 20, sqzPeriod = 20, kerPeriod = 14, bbMult = 2.0, kcMult = 1.5;
-      const pivotLeft = 5, pivotRight = 3, minSqzBars = 4;
-      const cooldownBars = (cfg?.COOLDOWN_BARS != null) ? Math.max(1, Number(cfg.COOLDOWN_BARS)) : 4;
+      const pivotLeft = 5, pivotRight = 3, minSqzBars = 4, cooldownBars = 6;
       const alphaFast = 2.0 / (sqzPeriod + 1.0);
       const alphaSlow = 2.0 / 51.0;
 
@@ -585,15 +525,11 @@
       const nowMs = Date.now();
       const signals = [];
       let latestSigDir = 0;
-      let latestSigProb = null;
 
       for (let i = 1; i < n; i++) {
         if (bars[i].c < vwapVal[i]) buyReset = 1;
         if (bars[i].c > vwapVal[i]) sellReset = 1;
         if (i < warmup) continue;
-
-        const barHrUtc = new Date(bars[i].t).getUTCHours();
-        if (!inUtcSessionJS(barHrUtc, sessStart, sessEnd)) continue;
 
         const bi = bars[i], at = atr[i], rng = bi.h - bi.l;
         if (at <= 1e-10 || rng < 0.25 * at) continue;
@@ -616,81 +552,66 @@
         const vwapSlope = vwapVal[i] - vwapVal[i - 3];
         const ker = kerSmooth[i], htfB = htfBias[i], z = vwapZ[i], mb = Number(macroBias) || 0;
 
-        let rawBSw = false, bSwExt = bi.l, trigBSq = false, trigBPl = false, bExt = bi.l;
+        let trigBSw = false, trigBSq = false, trigBPl = false, bExt = bi.l;
         if (enSweep && swLow[i - 1] > 0 && (i - swLowBar[i - 1]) <= 80) {
           const swl = swLow[i - 1];
           const swNow = bi.l < swl - 0.05 * at;
           const swPrv = (bars[i - 1].l < swl - 0.05 * at) && (bars[i - 1].l > swl - 2.5 * at);
           if ((swNow || swPrv) && bi.c > swl && (bi.c > bi.o || clvI >= 0.45) && ofi[i] >= 0.15 && z <= 1.2 && !(htfB === -1 && ker >= 0.45)) {
-            rawBSw = true;
-            bSwExt = swPrv ? Math.min(bi.l, bars[i - 1].l) : bi.l;
+            trigBSw = true;
+            bExt = swPrv ? Math.min(bi.l, bars[i - 1].l) : bi.l;
           }
         }
         if (enSqueeze) {
           let maxH5 = -Infinity;
           for (let k = i - 5; k < i; k++) if (bars[k].h > maxH5) maxH5 = bars[k].h;
-          if (recentSqz && sqzOn[i] === 0 && bi.c > kcUpper[i] && bi.c > maxH5 && sqzMom[i] > 0 && sqzMom[i] > sqzMom[i - 1] && rvol[i] >= 1.20 && clvI >= 0.35 && ofi[i] >= 0.25 && z <= 2.2 && htfB === 1) {
+          if (recentSqz && sqzOn[i] === 0 && bi.c > kcUpper[i] && bi.c > maxH5 && sqzMom[i] > 0 && sqzMom[i] > sqzMom[i - 1] && rvol[i] >= 1.20 && clvI >= 0.35 && ofi[i] >= 0.25 && z <= 2.2 && htfB >= 0) {
             trigBSq = true;
+            const lm = Math.min(bi.l, bars[i - 1].l);
+            bExt = trigBSw ? Math.min(bExt, lm) : lm;
           }
         }
         if (enPullback) {
-          const trendSup = (htfB === 1) && (ker >= 0.20 || vwapSlope > 0 || emaFast[i] > emaSlow[i]);
+          const trendSup = (htfB === 1) || (ker >= 0.25 && vwapSlope > 0 && emaFast[i] > emaSlow[i]);
           const touched = (bi.l <= vwapVal[i] + 0.25 * at) || (bars[i - 1].l <= vwapVal[i - 1] + 0.25 * at);
           const held = bi.l >= vwapVal[i] - 2.2 * vwapStd[i];
           const confC = bi.c > bi.o && bi.c > vwapVal[i] && clvI >= 0.35 && (bi.c > bars[i - 1].h || body >= 0.40 * at);
           if (trendSup && touched && held && confC && ofi[i] >= 0.20 && rvol[i] >= 1.00 && z <= 1.8) {
             trigBPl = true;
+            const pm = Math.min(bi.l, bars[i - 1].l);
+            bExt = (trigBSw || trigBSq) ? Math.min(bExt, pm) : pm;
           }
         }
-        const bodyAtrI = Math.abs(body) / Math.max(at, 1e-9);
-        const bSwRawRisk = Math.abs(bi.c - (bSwExt - slBufAtr * at));
-        const bSwRiskAtr = Math.max(1.10, Math.min(2.50, bSwRawRisk / Math.max(at, 1e-9)));
-        const bQualSw = (bSwRiskAtr >= 1.45 && bodyAtrI <= 0.90);
-        const bSwHtfOk = (htfMode === 2) ? true : (htfMode === 1 ? (htfB === 1) : (htfB === 0));
-        const trigBSw = rawBSw && (trigBSq || trigBPl || (bSwHtfOk && bQualSw));
-        if (trigBSw) {
-          bExt = bSwExt;
-          if (trigBSq || trigBPl) bExt = Math.min(bExt, Math.min(bi.l, bars[i - 1].l));
-        } else if (trigBSq || trigBPl) {
-          bExt = Math.min(bi.l, bars[i - 1].l);
-        }
 
-        let rawSSw = false, sSwExt = bi.h, trigSSq = false, trigSPl = false, sExt = bi.h;
+        let trigSSw = false, trigSSq = false, trigSPl = false, sExt = bi.h;
         if (enSweep && swHigh[i - 1] > 0 && (i - swHighBar[i - 1]) <= 80) {
           const swh = swHigh[i - 1];
           const swNow = bi.h > swh + 0.05 * at;
           const swPrv = (bars[i - 1].h > swh + 0.05 * at) && (bars[i - 1].h < swh + 2.5 * at);
           if ((swNow || swPrv) && bi.c < swh && (bi.c < bi.o || clvI <= -0.45) && ofi[i] <= -0.15 && z >= -1.2 && !(htfB === 1 && ker >= 0.45)) {
-            rawSSw = true;
-            sSwExt = swPrv ? Math.max(bi.h, bars[i - 1].h) : bi.h;
+            trigSSw = true;
+            sExt = swPrv ? Math.max(bi.h, bars[i - 1].h) : bi.h;
           }
         }
         if (enSqueeze) {
           let minL5 = Infinity;
           for (let k = i - 5; k < i; k++) if (bars[k].l < minL5) minL5 = bars[k].l;
-          if (recentSqz && sqzOn[i] === 0 && bi.c < kcLower[i] && bi.c < minL5 && sqzMom[i] < 0 && sqzMom[i] < sqzMom[i - 1] && rvol[i] >= 1.20 && clvI <= -0.35 && ofi[i] <= -0.25 && z >= -2.2 && htfB === -1) {
+          if (recentSqz && sqzOn[i] === 0 && bi.c < kcLower[i] && bi.c < minL5 && sqzMom[i] < 0 && sqzMom[i] < sqzMom[i - 1] && rvol[i] >= 1.20 && clvI <= -0.35 && ofi[i] <= -0.25 && z >= -2.2 && htfB <= 0) {
             trigSSq = true;
+            const hm = Math.max(bi.h, bars[i - 1].h);
+            sExt = trigSSw ? Math.max(sExt, hm) : hm;
           }
         }
         if (enPullback) {
-          const trendSup = (htfB === -1) && (ker >= 0.20 || vwapSlope < 0 || emaFast[i] < emaSlow[i]);
+          const trendSup = (htfB === -1) || (ker >= 0.25 && vwapSlope < 0 && emaFast[i] < emaSlow[i]);
           const touched = (bi.h >= vwapVal[i] - 0.25 * at) || (bars[i - 1].h >= vwapVal[i - 1] - 0.25 * at);
           const held = bi.h <= vwapVal[i] + 2.2 * vwapStd[i];
           const confC = bi.c < bi.o && bi.c < vwapVal[i] && clvI <= -0.35 && (bi.c < bars[i - 1].l || (-body) >= 0.40 * at);
           if (trendSup && touched && held && confC && ofi[i] <= -0.20 && rvol[i] >= 1.00 && z >= -1.8) {
             trigSPl = true;
+            const pm = Math.max(bi.h, bars[i - 1].h);
+            sExt = (trigSSw || trigSSq) ? Math.max(sExt, pm) : pm;
           }
-        }
-        const sSwRawRisk = Math.abs((sSwExt + slBufAtr * at) - bi.c);
-        const sSwRiskAtr = Math.max(1.10, Math.min(2.50, sSwRawRisk / Math.max(at, 1e-9)));
-        const sQualSw = (sSwRiskAtr >= 1.45 && bodyAtrI <= 0.90);
-        const sSwHtfOk = (htfMode === 2) ? true : (htfMode === 1 ? (htfB === -1) : (htfB === 0));
-        const trigSSw = rawSSw && (trigSSq || trigSPl || (sSwHtfOk && sQualSw));
-        if (trigSSw) {
-          sExt = sSwExt;
-          if (trigSSq || trigSPl) sExt = Math.max(sExt, Math.max(bi.h, bars[i - 1].h));
-        } else if (trigSSq || trigSPl) {
-          sExt = Math.max(bi.h, bars[i - 1].h);
         }
 
         let bScore = 0, bPB = "None";
@@ -712,7 +633,7 @@
           bScore += clvI >= 0.55 ? 5 : (clvI >= 0.35 ? 3 : 0);
           if (bi.c > bars[i - 1].h) bScore += 5;
           if (bullFvgDisp > 0.5) bScore += 4;
-          if (macroWeight > 0) bScore += Math.round(macroWeight * mb);
+          bScore += Math.round(0.15 * mb);
           bScore = Math.max(0, Math.min(100, bScore));
         }
 
@@ -735,12 +656,12 @@
           sScore += clvI <= -0.55 ? 5 : (clvI <= -0.35 ? 3 : 0);
           if (bi.c < bars[i - 1].l) sScore += 5;
           if (bearFvgDisp > 0.5) sScore += 4;
-          if (macroWeight > 0) sScore -= Math.round(macroWeight * mb);
+          sScore -= Math.round(0.15 * mb);
           sScore = Math.max(0, Math.min(100, sScore));
         }
 
-        const bOk = (bScore >= minScore);
-        const sOk = (sScore >= minScore);
+        const bOk = (bScore >= minScore) && ((lastSigDir !== 1) || (buyReset === 1));
+        const sOk = (sScore >= minScore) && ((lastSigDir !== -1) || (sellReset === 1));
         let finalDir = 0;
         if (bOk && !sOk) finalDir = 1;
         else if (sOk && !bOk) finalDir = -1;
@@ -749,7 +670,7 @@
         if (finalDir !== 0) {
           const entry = bi.c;
           const rawRisk = finalDir === 1 ? Math.abs(entry - (bExt - slBufAtr * at)) : Math.abs((sExt + slBufAtr * at) - entry);
-          const risk = Math.max(1.10 * at, Math.min(2.50 * at, rawRisk));
+          const risk = Math.max(0.80 * at, Math.min(2.50 * at, rawRisk));
           const sl = finalDir === 1 ? (entry - risk) : (entry + risk);
           const tp1 = finalDir === 1 ? (entry + tp1Mult * risk) : (entry - tp1Mult * risk);
           const tp2 = finalDir === 1 ? (entry + tp2Mult * risk) : (entry - tp2Mult * risk);
@@ -760,15 +681,6 @@
           if (finalDir === 1) { buyReset = 0; sellReset = 1; } else { sellReset = 0; buyReset = 1; }
           lastSigBar = i;
           lastSigDir = finalDir;
-
-          const hrUtc = new Date(bi.t).getUTCHours();
-          const distVwapAtr = Math.max(-6.0, Math.min(6.0, finalDir * ((bi.c - vwapVal[i]) / Math.max(at, 1e-9))));
-          const riskAtr = Math.max(0.5, Math.min(4.0, risk / Math.max(at, 1e-9)));
-          const bodyAtr = Math.max(0.0, Math.min(4.0, Math.abs(body) / Math.max(at, 1e-9)));
-          const isH1OrHigh = (tfName === "H1" || tfName === "H4" || tfName === "D1") ? 1.0 : 0.0;
-          const isLonNY = (hrUtc >= 7 && hrUtc <= 20) ? 1.0 : 0.0;
-          const isMulti = pbName === "MultiConf" ? 1.0 : 0.0;
-          const isPull = pbName === "VWAPPull" ? 1.0 : 0.0;
 
           const feats = [
             finalDir * ofi[i],
@@ -781,24 +693,12 @@
             atrPct[i] / 100.0,
             fvgAln,
             (finalDir * mb) / 100.0,
-            distVwapAtr,
-            riskAtr,
-            bodyAtr,
-            scoreVal / 100.0,
-            isH1OrHigh,
-            isLonNY,
-            isMulti,
-            isPull,
           ];
           const prob = evalMLProbJS(mlModel, feats);
           if (prob === null || prob >= mlThresh) {
-            if (i === lastClosedIdx) {
-              latestSigDir = finalDir;
-              latestSigProb = prob;
-            }
+            if (i === lastClosedIdx) latestSigDir = finalDir;
             if (i >= lastClosedIdx - maxBarsLookback && (nowMs - bi.t) <= maxAgeMs) {
               const dirStr = finalDir === 1 ? "BUY" : "SELL";
-              const gVal = signalGrade(scoreVal, prob, mlThresh, dirStr, mb);
               signals.push({
                 symbol: sym,
                 timeframe: tfName,
@@ -807,13 +707,7 @@
                 market_open: true,
                 direction: dirStr,
                 playbook: pbName,
-                grade: gVal,
-                suggested_risk_pct: suggestedRiskPctJS(gVal, oosExpR, prob, mlThresh),
-                wf_status: wfStatus,
-                strategy_tag: strategyTag,
-                sess_window: sessLabel,
-                macro_weight: Number(macroWeight.toFixed(2)),
-                ml_model_tag: mlModelTag,
+                grade: signalGrade(scoreVal, prob, mlThresh, dirStr, mb),
                 score: scoreVal,
                 ml_prob: prob != null ? Number(prob.toFixed(3)) : null,
                 macro_bias: mb,
@@ -833,31 +727,18 @@
 
       const idx = lastClosedIdx, bi = bars[idx], rng = bi.h - bi.l;
       const clvL = rng > 1e-12 ? (((bi.c - bi.l) - (bi.h - bi.c)) / rng) : 0.0;
-      const bodyL = bi.c - bi.o, atL = Math.max(atr[idx], 1e-9);
+      const bodyL = bi.c - bi.o, atL = atr[idx];
       const sv3 = Math.max(bars[idx].v, 1) + Math.max(bars[idx - 1].v, 1) + Math.max(bars[idx - 2].v, 1);
       const nd3 = (delta[idx] + delta[idx - 1] + delta[idx - 2]) / Math.max(sv3, 1.0);
       const bFvgL = ((bi.l > bars[idx - 2].h) || (bodyL >= 0.65 * atL && rvol[idx] >= 1.25 && clvL >= 0.50)) ? 1.0 : 0.0;
       const sFvgL = ((bi.h < bars[idx - 2].l) || ((-bodyL) >= 0.65 * atL && rvol[idx] >= 1.25 && clvL <= -0.50)) ? 1.0 : 0.0;
-      const hrL = new Date(bi.t).getUTCHours();
-      const bodyAtrL = Math.max(0.0, Math.min(4.0, Math.abs(bodyL) / atL));
-      const isLonL = (hrL >= 7 && hrL <= 20) ? 1.0 : 0.0;
 
       const makeFeats = (d) => [
         d * ofi[idx], d * nd3, Math.min(rvol[idx], 5.0), d * vwapZ[idx], kerSmooth[idx],
         d * htfBias[idx], d * clvL, atrPct[idx] / 100.0, d === 1 ? bFvgL : sFvgL, (d * (Number(macroBias) || 0)) / 100.0,
-        Math.max(-6.0, Math.min(6.0, d * ((bi.c - vwapVal[idx]) / atL))),
-        1.10,
-        bodyAtrL,
-        0.70,
-        0.0,
-        isLonL,
-        0.0,
-        0.0,
       ];
-      let pBuy = evalMLProbJS(mlModel, makeFeats(1));
-      let pSell = evalMLProbJS(mlModel, makeFeats(-1));
-      if (latestSigDir === 1 && latestSigProb != null) pBuy = latestSigProb;
-      else if (latestSigDir === -1 && latestSigProb != null) pSell = latestSigProb;
+      const pBuy = evalMLProbJS(mlModel, makeFeats(1));
+      const pSell = evalMLProbJS(mlModel, makeFeats(-1));
 
       let setupStatus = "WAIT";
       if (latestSigDir === 1) setupStatus = "CONFIRMED BUY";
@@ -879,11 +760,7 @@
           sqz_on: sqzOn[idx],
           htf_bias: htfBias[idx],
           min_score: minScore,
-          strategy_tag: strategyTag,
-          sess_window: sessLabel,
-          macro_weight: Number(macroWeight.toFixed(2)),
-          ml_model_tag: mlModelTag,
-          ml_min_prob: Number(mlThresh.toFixed(3)),
+          ml_min_prob: Number(mlThresh.toFixed(2)),
           ml_buy_prob: pBuy != null ? Number(pBuy.toFixed(3)) : null,
           ml_sell_prob: pSell != null ? Number(pSell.toFixed(3)) : null,
           setup_status: setupStatus,
@@ -1132,17 +1009,15 @@
       try {
         const ref = await resolveDataBase();
         const opts = { cache: "no-store" };
-        const [macro, signals, ml, evo] = await Promise.all([
+        const [macro, signals, ml] = await Promise.all([
           fetch(`${ref.base}/macro_snapshot.json${ref.bust}`, opts).then(r => r.ok ? r.json() : null),
           fetch(`${ref.base}/latest_signals.json${ref.bust}`, opts).then(r => r.ok ? r.json() : null),
           fetch(`${ref.base}/ml_report.json${ref.bust}`, opts).then(r => r.ok ? r.json() : null),
-          fetch(`${ref.base}/ml_evolution_log.json${ref.bust}`, opts).then(r => r.ok ? r.json() : null).catch(() => null),
         ]);
 
         liveState.macro = macro;
         liveState.signals = signals;
         liveState.ml = ml;
-        liveState.evolution = evo;
         liveState.refSha = ref.sha;
         liveState.checkedLocal = new Date().toLocaleTimeString();
 
@@ -1152,7 +1027,6 @@
         renderSignals(signals);
         renderTelemetry(signals, macro);
         renderML(ml);
-        renderEvolutionAndLedger(signals, ml, evo);
       } catch (e) {
         document.getElementById("timestamps").textContent = "Error loading cloud JSON artifacts: " + e.message;
       } finally {
@@ -1197,9 +1071,6 @@
         const rtBadge = s.source === "LIVE_RT" ? `<span class="pill pill-bull"><span class="live-dot"></span>LIVE RT</span>` : "";
         const closedBadge = muted ? `<span class="pill">CLOSED</span>` : "";
         const slPctTxt = s.sl_dist_pct != null ? ` (${s.sl_dist_pct}%)` : "";
-        const riskTxt = s.suggested_risk_pct != null ? ` &bull; Risk <strong>${s.suggested_risk_pct}%</strong>` : "";
-        const dnaTxt = s.strategy_tag ? ` &bull; DNA <strong>${s.strategy_tag}</strong>` : "";
-        const modelTxt = s.ml_model_tag ? ` <span class="neu">(${s.ml_model_tag})</span>` : "";
         return `
           <div class="sig-card ${isBuy ? "sig-buy" : "sig-sell"}" style="${muted ? "opacity:0.75;" : ""}">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px;">
@@ -1211,7 +1082,7 @@
               </div>
             </div>
             <div style="font-size:0.82rem;color:var(--muted);margin-bottom:8px;">
-              Closed: ${s.bar_time_utc} &bull; Score <strong>${s.score}/100</strong>${mlTxt}${modelTxt}${dnaTxt}${riskTxt} &bull; Macro ${s.macro_bias >= 0 ? "+" : ""}${s.macro_bias}
+              Closed: ${s.bar_time_utc} &bull; Score <strong>${s.score}/100</strong>${mlTxt} &bull; Macro ${s.macro_bias >= 0 ? "+" : ""}${s.macro_bias}
             </div>
             <div style="font-family:monospace;font-size:0.83rem;">
               Entry: ${s.entry} | SL: <span class="neg">${s.sl}</span>${slPctTxt}<br/>
@@ -1287,7 +1158,7 @@
       const baseRows = signals?.telemetry || [];
       if (!baseRows.length) {
         if (notice) notice.style.display = "none";
-        tb.innerHTML = `<tr><td colspan="17" class="neu">No telemetry available yet.</td></tr>`;
+        tb.innerHTML = `<tr><td colspan="16" class="neu">No telemetry available yet.</td></tr>`;
         return;
       }
       let closedCount = 0;
@@ -1316,22 +1187,15 @@
           : "";
         const barTxt = r.bar_time_utc ? r.bar_time_utc.slice(5) : "—";
 
-        const symCfgM15 = getSymConfig(r.symbol, "M15");
-        const mlTag = r.ml_model_tag || liveState.ml?.symbol_models?.[r.symbol]?.model_tag || "GLOBAL";
-        const dnaTag = r.strategy_tag || symCfgM15?.STRATEGY_TAG || "ALL_24H";
-        const sessWin = r.sess_window || ((symCfgM15 && (Number(symCfgM15.SESS_START_UTC) !== 0 || Number(symCfgM15.SESS_END_UTC) < 24)) ? `${String(symCfgM15.SESS_START_UTC).padStart(2, "0")}-${String(symCfgM15.SESS_END_UTC).padStart(2, "0")}Z` : "24/7");
-
-        const gatePct = (r.ml_min_prob != null) ? Number((r.ml_min_prob * 100).toFixed(1)) : "—";
-        const pBuy = r.ml_buy_prob != null ? (r.ml_buy_prob * 100).toFixed(1) : null;
-        const pSell = r.ml_sell_prob != null ? (r.ml_sell_prob * 100).toFixed(1) : null;
-        let mlCellHtml = `<span class="neu">Gate &ge;${gatePct}%</span><div style="font-size:0.71rem;color:var(--blue)">${mlTag}</div>`;
+        const gatePct = (r.ml_min_prob != null) ? (r.ml_min_prob * 100).toFixed(0) : "—";
+        const pBuy = r.ml_buy_prob != null ? (r.ml_buy_prob * 100).toFixed(0) : null;
+        const pSell = r.ml_sell_prob != null ? (r.ml_sell_prob * 100).toFixed(0) : null;
+        let mlCellHtml = `<span class="neu">Gate &ge;${gatePct}%</span>`;
         if (pBuy !== null && pSell !== null) {
           const bPass = r.ml_buy_prob >= r.ml_min_prob;
           const sPass = r.ml_sell_prob >= r.ml_min_prob;
-          mlCellHtml = `<span class="${bPass ? "pos" : "neu"}">B ${pBuy}%</span> / <span class="${sPass ? "neg" : "neu"}">S ${pSell}%</span><div style="font-size:0.72rem;color:var(--muted)">Gate &ge;${gatePct}% &bull; <span style="color:var(--blue)">${mlTag}</span></div>`;
+          mlCellHtml = `<span class="${bPass ? "pos" : "neu"}">B ${pBuy}%</span> / <span class="${sPass ? "neg" : "neu"}">S ${pSell}%</span><div style="font-size:0.72rem;color:var(--muted)">Gate &ge;${gatePct}%</div>`;
         }
-
-        const dnaCellHtml = `<span class="pill pill-info" style="font-size:0.72rem">${dnaTag}</span><div style="font-size:0.72rem;color:var(--muted)">${sessWin}</div>`;
 
         const stTxt = r.setup_status || "WAIT";
         let stCls = "";
@@ -1356,7 +1220,6 @@
           <td>${htf}</td>
           <td>${sqz}</td>
           <td>${mlCellHtml}</td>
-          <td>${dnaCellHtml}</td>
           <td>${setupCell}</td>
         </tr>`;
       }).join("");
@@ -1372,62 +1235,24 @@
 
     function renderML(ml) {
       const sumEl = document.getElementById("mlSummary");
-      const pbEl = document.getElementById("playbookStats");
       const fwEl = document.getElementById("featWeights");
       const cfgEl = document.getElementById("cfgBody");
-      const symEl = document.getElementById("symMlTable");
       if (!ml) { sumEl.textContent = "ML report unavailable."; return; }
       const g = ml.global_model || {};
-      const peb = ml.portfolio_eb_ml_summary || null;
-      const wf = ml.wf_portfolio_summary || {};
-      const geom = ml.trade_geometry || { tp1_mult: 0.50, tp2_mult: 3.00, tp1_weight: 0.65, runner_sl_r: -0.50 };
-      const mlWinCls = (g.ml_oos_win_pct >= 70.0) ? "pos" : "neu";
-      const foldsTxt = (g.ml_pos_folds != null && g.ml_eval_folds != null) ? `${g.ml_pos_folds}/${g.ml_eval_folds} folds` : "—";
-      const mlPfTxt = g.ml_oos_pf != null ? `PF ${fmt(g.ml_oos_pf, 2)}` : "PF —";
-      const gateTxt = g.ml_min_prob ? Number((g.ml_min_prob * 100).toFixed(1)) + "%" : "—";
-      const keptTxt = g.kept_fraction != null ? `${Math.round(g.kept_fraction * 100)}% kept` : "—";
-
-      const pebHtml = peb ? `
-        <div style="margin-bottom:10px;padding:10px 12px;border-radius:8px;background:rgba(46,229,157,0.06);border:1px solid rgba(46,229,157,0.28);font-size:0.84rem;">
-          <strong>10-Symbol Dedicated EB-ML Portfolio (${peb.oos_trades} Unseen OOS Trades):</strong>
-          <span class="${peb.ml_oos_win_pct >= 69.5 ? "pos" : "neu"}"><strong>${peb.ml_oos_win_pct}% Win</strong></span> /
-          <span class="${cls(peb.ml_oos_exp_r)}"><strong>${peb.ml_oos_exp_r >= 0 ? "+" : ""}${fmt(peb.ml_oos_exp_r, 4)}R</strong></span>
-          (PF <strong>${fmt(peb.ml_oos_pf, 2)}</strong> vs Base ${peb.base_oos_win_pct}% / ${peb.base_oos_exp_r >= 0 ? "+" : ""}${fmt(peb.base_oos_exp_r, 4)}R)
-          &bull; Unique Models: <strong class="pos">${peb.unique_symbol_models}/${peb.symbols_total}</strong>
-          &bull; Positive Symbols: <strong class="pos">${peb.positive_symbols_count}/${peb.symbols_total}</strong>
-        </div>` : "";
-
       sumEl.innerHTML = `
-        <div style="margin-bottom:10px;padding:8px 12px;border-radius:8px;background:#0f1520;border:1px solid var(--border);font-size:0.81rem;">
-          <strong>Window:</strong> Rolling ${ml.training_window_days ?? 365}d (${ml.time_decay_half_life_days ?? 120}d half-life) &bull;
-          <strong>Rule:</strong> TP1 ${fmt(geom.tp1_mult,2)}R (${Math.round((geom.tp1_weight ?? 0.65)*100)}% + rSL ${fmt(geom.runner_sl_r,2)}R) &rarr; TP2 ${fmt(geom.tp2_mult,2)}R
-        </div>
-        ${pebHtml}
-        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:0.85rem;">
-          <div>Global Prior OOS: <strong class="${mlWinCls}">${g.ml_oos_win_pct ?? "—"}% Win</strong> / <span class="${cls(g.ml_oos_exp_r)}">${g.ml_oos_exp_r >= 0 ? "+" : ""}${fmt(g.ml_oos_exp_r,4)}R</span> (${mlPfTxt}, ${foldsTxt})</div>
-          <div>Global Samples / Gate: <strong>${g.samples ?? "—"}</strong> (Gate &ge;${gateTxt}, ${keptTxt}, ${g.ml_oos_trades ?? "—"} OOS)</div>
-          <div>Intraday Base OOS: <strong>${g.base_oos_win_pct ?? "—"}% Win</strong> / <span class="${cls(g.base_oos_exp_r)}">${g.base_oos_exp_r >= 0 ? "+" : ""}${g.base_oos_exp_r ?? "—"}R</span> &bull; AUC <strong>${g.auc_lr ?? "—"}</strong></div>
-          <div>WF / Adapt / Def: <strong class="pos">${wf.wf_optimized_count ?? "—"}</strong> / <strong style="color:var(--blue)">${wf.adaptive_ml_gate_count ?? 0}</strong> / <span class="neu">${wf.defensive_filter_count ?? "—"}</span> &bull; Live: <strong>${g.live_feedback_used ?? ml.live_feedback_count ?? 0}</strong></div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:0.86rem;">
+          <div>Samples: <strong>${g.samples ?? "—"}</strong> (OOS ${g.oos_samples ?? "—"})</div>
+          <div>Global ML Gate: <strong>&ge; ${g.ml_min_prob ? (g.ml_min_prob * 100).toFixed(0) + "%" : "—"}</strong></div>
+          <div>Logistic OOS AUC: <strong>${g.auc_lr ?? "—"}</strong> (Brier ${g.brier_lr ?? "—"})</div>
+          <div>HistGB OOS AUC: <strong>${g.auc_gb ?? "—"}</strong> (Brier ${g.brier_gb ?? "—"})</div>
+          <div>Baseline OOS: <strong>${g.base_oos_win_pct ?? "—"}%</strong> / <span class="${cls(g.base_oos_exp_r)}">${g.base_oos_exp_r >= 0 ? "+" : ""}${g.base_oos_exp_r ?? "—"}R</span></div>
+          <div>ML-Filtered OOS: <strong>${g.ml_oos_win_pct ?? "—"}%</strong> / <span class="${cls(g.ml_oos_exp_r)}">${g.ml_oos_exp_r >= 0 ? "+" : ""}${g.ml_oos_exp_r ?? "—"}R</span></div>
         </div>`;
-
-      const pbs = ml.playbook_oos_stats || {};
-      const pbKeys = Object.keys(pbs).sort((a, b) => (pbs[b].exp_r ?? -9) - (pbs[a].exp_r ?? -9));
-      if (pbEl && pbKeys.length) {
-        pbEl.innerHTML = `<div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px;">Intraday Regime-Matched Playbook Performance (1Y M15+H1)</div>` +
-          `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;font-size:0.80rem;">` +
-          pbKeys.map(k => {
-            const st = pbs[k];
-            return `<div style="background:#0f1520;border:1px solid var(--border);border-radius:8px;padding:8px 10px;">
-              <strong>${k}</strong> <span class="neu">(${st.trades})</span><br/>
-              Win ${st.win_pct}% &bull; <span class="${cls(st.exp_r)}">${st.exp_r >= 0 ? "+" : ""}${st.exp_r}R</span> &bull; PF ${st.pf}
-            </div>`;
-          }).join("") + `</div>`;
-      }
 
       const weights = ml.global_feature_weights || {};
       const entries = Object.entries(weights).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
       const maxW = Math.max(0.25, ...entries.map(([, v]) => Math.abs(v)));
-      fwEl.innerHTML = `<div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px;">Global Baseline Standardized Logistic Weights (${entries.length} Features)</div>` +
+      fwEl.innerHTML = `<div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px;">Standardized Logistic Feature Weights</div>` +
         entries.map(([k, v]) => {
           const pct = Math.min(100, Math.round(Math.abs(v) / maxW * 100));
           const col = v >= 0 ? "var(--green)" : "var(--red)";
@@ -1439,145 +1264,16 @@
         }).join("");
 
       const cfgs = ml.optimized_configs || [];
-      cfgEl.innerHTML = cfgs.map(c => {
-        const pbsTxt = `${c.EN_SWEEP ? "Sw" : "—"}/${c.EN_SQUEEZE ? "Sq" : "—"}/${c.EN_PULLBACK ? "Pl" : "—"}`;
-        const stStr = String(c.STATUS || "");
-        const stCls = stStr === "WF_OPTIMIZED" ? "pill-bull" : (stStr === "ADAPTIVE_ML_GATE" || stStr.startsWith("CLASS_") ? "pill-info" : (stStr === "DEFENSIVE_FILTER" ? "pill-warn" : ""));
-        const s0 = c.SESS_START_UTC != null ? Number(c.SESS_START_UTC) : 0;
-        const s1 = c.SESS_END_UTC != null ? Number(c.SESS_END_UTC) : 24;
-        const sessTxt = (s0 === 0 && s1 >= 24) ? "24/7" : `${String(s0).padStart(2, "0")}-${String(s1).padStart(2, "0")}Z`;
-        const dnaTxt = c.STRATEGY_TAG || "ALL_24H";
-        const macW = c.MACRO_WEIGHT != null ? fmt(c.MACRO_WEIGHT, 2) : "0.15";
-        return `<tr>
-          <td><strong>${c.SYMBOL}</strong></td>
-          <td>${c.TIMEFRAME}</td>
-          <td style="font-size:0.78rem"><strong>${dnaTxt}</strong> <span class="neu">(${sessTxt})</span></td>
-          <td>${c.MIN_SCORE}+</td>
-          <td>${c.VWAP_PERIOD}</td>
-          <td class="neu" style="font-size:0.78rem">${pbsTxt}</td>
-          <td>${macW}</td>
-          <td>${c.TP1_MULT}/${c.TP2_MULT}R</td>
-          <td>${fmt(c.OOS_WIN_PCT,1)}%</td>
-          <td class="${cls(c.OOS_EXP_R)}">${c.OOS_EXP_R >= 0 ? "+" : ""}${fmt(c.OOS_EXP_R,3)}</td>
-          <td>${c.OOS_PF != null ? fmt(c.OOS_PF,2) : "—"}</td>
-          <td><span class="pill ${stCls}">${stStr}</span></td>
-        </tr>`;
-      }).join("");
-
-      if (symEl) {
-        const symMods = ml.symbol_models || {};
-        const symKeys = Object.keys(symMods);
-        if (!symKeys.length) {
-          symEl.innerHTML = `<span class="neu">Per-symbol model breakdown unavailable.</span>`;
-        } else {
-          symEl.innerHTML = `<table><thead><tr><th>Symbol</th><th>Model Type</th><th>Penalty / C</th><th>OOS AUC</th><th>Base &rarr; ML Win%</th><th>Base &rarr; ML Exp(R)</th><th>PF</th><th>Folds / OOS N</th><th>ML Gate</th><th>Top 3 Feature Drivers</th></tr></thead><tbody>` +
-            symKeys.map(sym => {
-              const m = symMods[sym] || {};
-              const mTag = m.model_tag || "GLOBAL";
-              const tagCls = mTag === "SYM_PURE" ? "pill-bull" : (mTag.startsWith("SYM_EB") ? "pill-info" : "pill-warn");
-              const penTxt = m.pen ? `${String(m.pen).toUpperCase()}(${m.best_c})` : "—";
-              const aucTxt = m.auc_lr != null ? Number(m.auc_lr).toFixed(3) : "—";
-              const topFeats = Array.isArray(m.top_features) && m.top_features.length
-                ? m.top_features.slice(0, 3).map(f => `<span class="${cls(f.weight)}" style="font-family:monospace;font-size:0.77rem">${f.name}(${f.weight >= 0 ? "+" : ""}${f.weight.toFixed(2)})</span>`).join(", ")
-                : `<span class="neu">—</span>`;
-              const fTxt = (m.ml_pos_folds != null && m.ml_eval_folds != null) ? `${m.ml_pos_folds}/${m.ml_eval_folds} (n=${m.ml_oos_trades ?? "—"})` : "—";
-              const gTxt = m.ml_min_prob != null ? `&ge;${(m.ml_min_prob * 100).toFixed(1)}%` : "—";
-              return `<tr>
-                <td><strong>${sym}</strong></td>
-                <td><span class="pill ${tagCls}">${mTag}</span></td>
-                <td class="neu">${penTxt}</td>
-                <td>${aucTxt}</td>
-                <td>${fmt(m.base_oos_win_pct,1)}% &rarr; <strong class="${m.ml_oos_win_pct >= 70 ? "pos" : "neu"}">${fmt(m.ml_oos_win_pct,1)}%</strong></td>
-                <td><span class="${cls(m.base_oos_exp_r)}">${m.base_oos_exp_r >= 0 ? "+" : ""}${fmt(m.base_oos_exp_r,3)}R</span> &rarr; <strong class="${cls(m.ml_oos_exp_r)}">${m.ml_oos_exp_r >= 0 ? "+" : ""}${fmt(m.ml_oos_exp_r,4)}R</strong></td>
-                <td><strong>${fmt(m.ml_oos_pf,2)}</strong></td>
-                <td class="neu">${fTxt}</td>
-                <td>${gTxt}</td>
-                <td>${topFeats}</td>
-              </tr>`;
-            }).join("") + `</tbody></table>`;
-        }
-      }
-    }
-
-    function renderEvolutionAndLedger(signals, ml, evo) {
-      const liveSumEl = document.getElementById("liveAuditSummary");
-      const liveTblEl = document.getElementById("liveAuditTable");
-      const evoSumEl = document.getElementById("evoSummary");
-      const evoTblEl = document.getElementById("evoTable");
-
-      const audit = signals?.live_outcome_audit;
-      if (liveSumEl && liveTblEl) {
-        if (!audit) {
-          liveSumEl.innerHTML = `<span class="neu">Live outcome ledger initializing on next confirmed signal...</span>`;
-          liveTblEl.innerHTML = "";
-        } else {
-          const driftCls = audit.drift_status === "NOMINAL" ? "pill-bull" : (audit.drift_status === "DRIFT_ALERT" ? "pill-bear" : "pill-warn");
-          const winStr = audit.live_win_pct != null ? `${fmt(audit.live_win_pct, 1)}%` : "—";
-          const expStr = audit.live_exp_r != null ? `${audit.live_exp_r >= 0 ? "+" : ""}${fmt(audit.live_exp_r, 3)}R` : "—";
-          const pfStr = audit.live_pf != null ? fmt(audit.live_pf, 2) : "—";
-          liveSumEl.innerHTML = `
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:0.83rem;">
-              <div style="background:#0f1520;border:1px solid var(--border);border-radius:8px;padding:8px 10px;">
-                <div class="kpi-label">Open / Graded</div>
-                <div><strong>${audit.open_count}</strong> / <strong>${audit.graded_total}</strong> <span class="neu">(${audit.graded_30d} 30d)</span></div>
-              </div>
-              <div style="background:#0f1520;border:1px solid var(--border);border-radius:8px;padding:8px 10px;">
-                <div class="kpi-label">Live Win%</div>
-                <div class="${audit.live_win_pct >= 70 ? "pos" : "neu"}"><strong>${winStr}</strong></div>
-              </div>
-              <div style="background:#0f1520;border:1px solid var(--border);border-radius:8px;padding:8px 10px;">
-                <div class="kpi-label">Live Exp / PF</div>
-                <div class="${cls(audit.live_exp_r)}"><strong>${expStr}</strong> <span class="neu">(PF ${pfStr})</span></div>
-              </div>
-              <div style="background:#0f1520;border:1px solid var(--border);border-radius:8px;padding:8px 10px;">
-                <div class="kpi-label">Model Drift</div>
-                <div><span class="pill ${driftCls}">${audit.drift_status}</span></div>
-              </div>
-            </div>`;
-          const rec = audit.recent_graded || [];
-          if (rec.length > 0) {
-            liveTblEl.innerHTML = `<table><thead><tr><th>Time</th><th>Symbol</th><th>Dir</th><th>Playbook</th><th>ML%</th><th>Result</th><th>Net R</th></tr></thead><tbody>` +
-              rec.map(r => `<tr>
-                <td class="neu" style="font-family:monospace;font-size:0.78rem">${(r.bar_time_utc || "").slice(5)}</td>
-                <td><strong>${r.symbol}</strong> ${r.timeframe}</td>
-                <td class="${r.direction === "BUY" ? "pos" : "neg"}">${r.direction}</td>
-                <td>${r.playbook}</td>
-                <td>${r.ml_prob != null ? (r.ml_prob * 100).toFixed(0) + "%" : "—"}</td>
-                <td><span class="pill ${Number(r.r_net) > 0 ? "pill-bull" : "pill-bear"}">${r.status}</span></td>
-                <td class="${cls(r.r_net)}">${r.r_net >= 0 ? "+" : ""}${fmt(r.r_net, 3)}R</td>
-              </tr>`).join("") + `</tbody></table>`;
-          } else {
-            liveTblEl.innerHTML = `<div class="neu" style="font-size:0.83rem;">Open live signals are automatically graded on subsequent closed M15/H1 bars and fed back into daily retraining at 2.5x recency weight.</div>`;
-          }
-        }
-      }
-
-      if (evoSumEl && evoTblEl) {
-        const dec = ml?.evolution_decision;
-        const hist = evo?.history || [];
-        if (dec) {
-          const decCls = dec.promoted ? "pill-bull" : "pill-warn";
-          evoSumEl.innerHTML = `<span class="pill ${decCls}">${dec.status}</span> <span class="neu" style="font-size:0.82rem;margin-left:6px;">Auto-retrains daily @ 03:00 UTC on trailing 365d rolling bars + live graded outcomes</span>`;
-        } else {
-          evoSumEl.innerHTML = `<span class="neu" style="font-size:0.82rem;">Daily evolution log awaiting first v3.5 training entry.</span>`;
-        }
-        if (hist.length > 0) {
-          const show = hist.slice(-10).reverse();
-          evoTblEl.innerHTML = `<table><thead><tr><th>Cycle (UTC)</th><th>1Y N</th><th>Live</th><th>OOS Win%</th><th>OOS Exp</th><th>PF</th><th>Gate</th><th>Decision</th></tr></thead><tbody>` +
-            show.map(h => `<tr>
-              <td class="neu" style="font-family:monospace;font-size:0.78rem">${(h.updated_utc || "").slice(0, 16)}Z</td>
-              <td>${h.samples_1y ?? "—"}</td>
-              <td>${h.live_feedback_used ?? 0}</td>
-              <td class="${h.ml_oos_win_pct >= 70 ? "pos" : "neu"}"><strong>${fmt(h.ml_oos_win_pct, 1)}%</strong></td>
-              <td class="${cls(h.ml_oos_exp_r)}">${h.ml_oos_exp_r >= 0 ? "+" : ""}${fmt(h.ml_oos_exp_r, 4)}R</td>
-              <td>${fmt(h.ml_oos_pf, 2)}</td>
-              <td>&ge;${h.ml_min_prob ? Number((h.ml_min_prob * 100).toFixed(1)) + "%" : "—"}</td>
-              <td><span class="pill ${h.promoted ? "pill-bull" : "pill-warn"}">${h.decision}</span></td>
-            </tr>`).join("") + `</tbody></table>`;
-        } else {
-          evoTblEl.innerHTML = "";
-        }
-      }
+      cfgEl.innerHTML = cfgs.map(c => `<tr>
+        <td><strong>${c.SYMBOL}</strong></td>
+        <td>${c.TIMEFRAME}</td>
+        <td>${c.MIN_SCORE}+</td>
+        <td>${c.VWAP_PERIOD}</td>
+        <td>${c.TP1_MULT}/${c.TP2_MULT}R</td>
+        <td>${fmt(c.OOS_WIN_PCT,1)}%</td>
+        <td class="${cls(c.OOS_EXP_R)}">${c.OOS_EXP_R >= 0 ? "+" : ""}${fmt(c.OOS_EXP_R,3)}</td>
+        <td><span class="pill ${c.STATUS === "WF_OPTIMIZED" ? "pill-bull" : ""}">${c.STATUS}</span></td>
+      </tr>`).join("");
     }
 
     renderSessionStrip();

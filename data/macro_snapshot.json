@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-24T06:00:37Z",
+  "updated_utc": "2026-11-24T06:23:49Z",
   "global_bias": -10,
   "global_regime": {
     "vix": 26.62,
@@ -13,14 +13,14 @@
     "yield_curve_10y2y": 0.29,
     "fed_net_liq_trillion": 5.824,
     "fed_net_liq_4w_pct": 0.4,
-    "dxy": 104.29,
+    "dxy": 104.28,
     "dxy_ret20_pct": 1.92,
     "breadth_rsp_spy_20d_pct": 3.78,
     "credit_hyg_tlt_20d_pct": -0.89,
     "tech_qqq_xlp_20d_pct": -11.04,
     "stablecoins": {
-      "total_usd_b": 283.25,
-      "chg_7d_pct": -1.11,
+      "total_usd_b": 283.24,
+      "chg_7d_pct": -1.12,
       "chg_30d_pct": -5.73
     },
     "fear_greed": {
@@ -229,7 +229,7 @@
     },
     "USDJPY": {
       "asset_class": "fx",
-      "bias_score": 1,
+      "bias_score": 0,
       "note": "COT88_ETF-1_VIXBack",
       "cot": {
         "ok": true,
