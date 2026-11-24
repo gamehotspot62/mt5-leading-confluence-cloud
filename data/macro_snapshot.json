@@ -1,10 +1,10 @@
 {
-  "updated_utc": "2026-11-24T08:39:19Z",
+  "updated_utc": "2026-11-24T08:50:01Z",
   "global_bias": -10,
   "global_regime": {
-    "vix": 26.42,
+    "vix": 26.79,
     "vix3m": 25.5,
-    "vix_vix3m_ratio": 1.036,
+    "vix_vix3m_ratio": 1.051,
     "vix_state": "BACKWARDATION_RISK_OFF",
     "hy_oas_pct": 3.76,
     "hy_oas_chg20": 0.38,
@@ -13,8 +13,8 @@
     "yield_curve_10y2y": 0.29,
     "fed_net_liq_trillion": 5.824,
     "fed_net_liq_4w_pct": 0.4,
-    "dxy": 104.33,
-    "dxy_ret20_pct": 1.96,
+    "dxy": 104.25,
+    "dxy_ret20_pct": 1.89,
     "breadth_rsp_spy_20d_pct": 3.78,
     "credit_hyg_tlt_20d_pct": -0.89,
     "tech_qqq_xlp_20d_pct": -11.04,
@@ -129,7 +129,7 @@
     },
     "XAGUSD": {
       "asset_class": "metals",
-      "bias_score": -20,
+      "bias_score": -19,
       "note": "COT98_ETF-25_VIXBack",
       "cot": {
         "ok": true,
@@ -154,7 +154,7 @@
     },
     "USOIL": {
       "asset_class": "energy",
-      "bias_score": -13,
+      "bias_score": -12,
       "note": "COT99_ETF-11_VIXBack",
       "cot": {
         "ok": true,
@@ -204,7 +204,7 @@
     },
     "GBPUSD": {
       "asset_class": "fx",
-      "bias_score": -19,
+      "bias_score": -18,
       "note": "COT22_ETF-25_VIXBack",
       "cot": {
         "ok": true,
@@ -229,7 +229,7 @@
     },
     "USDJPY": {
       "asset_class": "fx",
-      "bias_score": 1,
+      "bias_score": 0,
       "note": "COT88_ETF-1_VIXBack",
       "cot": {
         "ok": true,
