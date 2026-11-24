@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-24T05:00:32Z",
+  "updated_utc": "2026-11-24T06:00:37Z",
   "global_bias": -10,
   "global_regime": {
     "vix": 26.62,
@@ -13,8 +13,8 @@
     "yield_curve_10y2y": 0.29,
     "fed_net_liq_trillion": 5.824,
     "fed_net_liq_4w_pct": 0.4,
-    "dxy": 104.32,
-    "dxy_ret20_pct": 2.31,
+    "dxy": 104.29,
+    "dxy_ret20_pct": 1.92,
     "breadth_rsp_spy_20d_pct": 3.78,
     "credit_hyg_tlt_20d_pct": -0.89,
     "tech_qqq_xlp_20d_pct": -11.04,
@@ -31,7 +31,7 @@
   "symbols": {
     "XAUUSD": {
       "asset_class": "metals",
-      "bias_score": -28,
+      "bias_score": -26,
       "note": "COT100_ETF-25_VIXBack",
       "cot": {
         "ok": true,
@@ -56,7 +56,7 @@
     },
     "BTCUSD": {
       "asset_class": "crypto",
-      "bias_score": -27,
+      "bias_score": -26,
       "note": "MVRV_Healthy_ExOutflow_ExtremeFearContrarian_COT3",
       "cot": {
         "ok": true,
@@ -92,14 +92,14 @@
         "netflow_pts": 5.7,
         "ex_supply_30d_pct": 0.84,
         "stablecoins_30d_pct": -5.73,
-        "funding_8h": 4e-06,
-        "funding_pts": -0.1,
+        "funding_8h": -1e-06,
+        "funding_pts": 0.0,
         "fear_greed": 11.0
       }
     },
     "ETHUSD": {
       "asset_class": "crypto",
-      "bias_score": -9,
+      "bias_score": -8,
       "note": "MVRV_Value_ExInflow_ExtremeFearContrarian_ETF-23",
       "cot": {
         "ok": false
@@ -122,14 +122,14 @@
         "netflow_pts": -12.8,
         "ex_supply_30d_pct": -3.42,
         "stablecoins_30d_pct": -5.73,
-        "funding_8h": -2.1e-05,
+        "funding_8h": -2e-05,
         "funding_pts": 0.4,
         "fear_greed": 11.0
       }
     },
     "XAGUSD": {
       "asset_class": "metals",
-      "bias_score": -21,
+      "bias_score": -19,
       "note": "COT98_ETF-25_VIXBack",
       "cot": {
         "ok": true,
@@ -179,7 +179,7 @@
     },
     "EURUSD": {
       "asset_class": "fx",
-      "bias_score": -23,
+      "bias_score": -20,
       "note": "COT1_ETF-25_VIXBack",
       "cot": {
         "ok": true,
@@ -204,7 +204,7 @@
     },
     "GBPUSD": {
       "asset_class": "fx",
-      "bias_score": -21,
+      "bias_score": -19,
       "note": "COT22_ETF-25_VIXBack",
       "cot": {
         "ok": true,
@@ -229,7 +229,7 @@
     },
     "USDJPY": {
       "asset_class": "fx",
-      "bias_score": 3,
+      "bias_score": 1,
       "note": "COT88_ETF-1_VIXBack",
       "cot": {
         "ok": true,
