@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-24T02:54:08Z",
+  "updated_utc": "2026-11-24T03:52:45Z",
   "global_bias": -10,
   "global_regime": {
     "vix": 26.62,
@@ -13,8 +13,8 @@
     "yield_curve_10y2y": 0.29,
     "fed_net_liq_trillion": 5.824,
     "fed_net_liq_4w_pct": 0.4,
-    "dxy": 104.25,
-    "dxy_ret20_pct": 1.89,
+    "dxy": 104.26,
+    "dxy_ret20_pct": 1.9,
     "breadth_rsp_spy_20d_pct": 3.78,
     "credit_hyg_tlt_20d_pct": -0.89,
     "tech_qqq_xlp_20d_pct": -11.04,
@@ -56,8 +56,8 @@
     },
     "BTCUSD": {
       "asset_class": "crypto",
-      "bias_score": -34,
-      "note": "ExOutflow_ExtremeFearContrarian_COT3_ETF-25",
+      "bias_score": -26,
+      "note": "MVRV_Healthy_ExOutflow_ExtremeFearContrarian_COT3",
       "cot": {
         "ok": true,
         "report_date": "2026-11-17",
@@ -86,19 +86,21 @@
       "cot_score": -25.0,
       "etf_score": -25.0,
       "onchain": {
+        "mvrv": 1.152,
+        "mvrv_pts": 15.0,
         "netflow7_ratio": -0.0316,
         "netflow_pts": 5.7,
         "ex_supply_30d_pct": 0.84,
         "stablecoins_30d_pct": -5.74,
-        "funding_8h": 1.1e-05,
+        "funding_8h": 1e-05,
         "funding_pts": -0.2,
         "fear_greed": 11.0
       }
     },
     "ETHUSD": {
       "asset_class": "crypto",
-      "bias_score": -24,
-      "note": "ExInflow_ExtremeFearContrarian_ETF-23_VIXBack",
+      "bias_score": -8,
+      "note": "MVRV_Value_ExInflow_ExtremeFearContrarian_ETF-23",
       "cot": {
         "ok": false
       },
@@ -114,12 +116,14 @@
       "cot_score": 0.0,
       "etf_score": -23.1,
       "onchain": {
-        "netflow7_ratio": 0.0641,
-        "netflow_pts": -11.5,
+        "mvrv": 0.851,
+        "mvrv_pts": 30.0,
+        "netflow7_ratio": 0.0708,
+        "netflow_pts": -12.8,
         "ex_supply_30d_pct": -3.42,
         "stablecoins_30d_pct": -5.74,
-        "funding_8h": -1.6e-05,
-        "funding_pts": 0.3,
+        "funding_8h": -2e-05,
+        "funding_pts": 0.4,
         "fear_greed": 11.0
       }
     },
