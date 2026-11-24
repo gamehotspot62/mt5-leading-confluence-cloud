@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-23T23:35:30Z",
+  "updated_utc": "2026-11-24T00:34:32Z",
   "global_bias": -10,
   "global_regime": {
     "vix": 26.62,
@@ -19,13 +19,13 @@
     "credit_hyg_tlt_20d_pct": -0.89,
     "tech_qqq_xlp_20d_pct": -11.04,
     "stablecoins": {
-      "total_usd_b": 282.74,
+      "total_usd_b": 282.73,
       "chg_7d_pct": -1.52,
       "chg_30d_pct": -5.96
     },
     "fear_greed": {
       "value": 11.0,
-      "avg7d": 11.3
+      "avg7d": 11.1
     }
   },
   "symbols": {
@@ -56,8 +56,8 @@
     },
     "BTCUSD": {
       "asset_class": "crypto",
-      "bias_score": -16,
-      "note": "MVRV_Value_ExOutflow_ExtremeFearContrarian_COT3",
+      "bias_score": -31,
+      "note": "ExOutflow_ExtremeFearContrarian_COT3_ETF-25",
       "cot": {
         "ok": true,
         "report_date": "2026-11-17",
@@ -86,11 +86,8 @@
       "cot_score": -25.0,
       "etf_score": -25.0,
       "onchain": {
-        "mvrv": 1.148,
-        "mvrv_pts": 30.0,
-        "netflow7_ratio": -0.0482,
-        "netflow_pts": 8.7,
-        "ex_supply_30d_pct": 0.49,
+        "netflow7_ratio": -0.0631,
+        "netflow_pts": 11.4,
         "stablecoins_30d_pct": -5.96,
         "funding_8h": 1.1e-05,
         "funding_pts": -0.2,
@@ -99,8 +96,8 @@
     },
     "ETHUSD": {
       "asset_class": "crypto",
-      "bias_score": -3,
-      "note": "MVRV_Value_ExNeut_ExtremeFearContrarian_ETF-23",
+      "bias_score": -31,
+      "note": "ExInflow_ExtremeFearContrarian_ETF-23_VIXBack",
       "cot": {
         "ok": false
       },
@@ -116,14 +113,11 @@
       "cot_score": 0.0,
       "etf_score": -23.1,
       "onchain": {
-        "mvrv": 0.852,
-        "mvrv_pts": 30.0,
-        "netflow7_ratio": 0.016,
-        "netflow_pts": -2.9,
-        "ex_supply_30d_pct": -3.81,
+        "netflow7_ratio": 0.0641,
+        "netflow_pts": -11.5,
         "stablecoins_30d_pct": -5.96,
-        "funding_8h": -7e-06,
-        "funding_pts": 0.1,
+        "funding_8h": -1.2e-05,
+        "funding_pts": 0.2,
         "fear_greed": 11.0
       }
     },
