@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-24T00:34:40Z",
+  "updated_utc": "2026-11-24T01:59:58Z",
   "entries": [
     {
       "sig_id": "XAUUSD|M15|2026-11-23T23:45Z|BUY",
@@ -38,11 +38,11 @@
         0.0,
         0.0
       ],
-      "status": "OPEN",
+      "status": "WIN_TP2",
       "hit_tp1": true,
       "cur_sl": 3623.389541,
-      "r_net": null,
-      "resolved_utc": null
+      "r_net": 1.325,
+      "resolved_utc": "2026-11-24T01:30Z"
     }
   ]
 }
