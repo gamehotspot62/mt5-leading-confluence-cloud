@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-24T23:46:41Z",
+  "updated_utc": "2026-11-25T00:37:50Z",
   "global_bias": -9,
   "global_regime": {
     "vix": 26.36,
@@ -19,13 +19,13 @@
     "credit_hyg_tlt_20d_pct": -1.34,
     "tech_qqq_xlp_20d_pct": -16.08,
     "stablecoins": {
-      "total_usd_b": 283.24,
+      "total_usd_b": 283.25,
       "chg_7d_pct": -1.12,
       "chg_30d_pct": -5.73
     },
     "fear_greed": {
-      "value": 11.0,
-      "avg7d": 11.1
+      "value": 13.0,
+      "avg7d": 11.4
     }
   },
   "symbols": {
@@ -56,8 +56,8 @@
     },
     "BTCUSD": {
       "asset_class": "crypto",
-      "bias_score": -25,
-      "note": "MVRV_Healthy_ExOutflow_ExtremeFearContrarian_COT3",
+      "bias_score": -33,
+      "note": "ExNeut_ExtremeFearContrarian_COT3_ETF-25",
       "cot": {
         "ok": true,
         "report_date": "2026-11-17",
@@ -71,7 +71,7 @@
         {
           "ticker": "IBIT",
           "ok": true,
-          "cmf10": -0.348,
+          "cmf10": -0.349,
           "ret10_pct": -19.0,
           "score": -25.0
         },
@@ -86,21 +86,18 @@
       "cot_score": -25.0,
       "etf_score": -25.0,
       "onchain": {
-        "mvrv": 1.152,
-        "mvrv_pts": 15.0,
-        "netflow7_ratio": -0.0316,
-        "netflow_pts": 5.7,
-        "ex_supply_30d_pct": 0.84,
+        "netflow7_ratio": -0.0248,
+        "netflow_pts": 4.5,
         "stablecoins_30d_pct": -5.73,
         "funding_8h": 1e-06,
         "funding_pts": -0.0,
-        "fear_greed": 11.0
+        "fear_greed": 13.0
       }
     },
     "ETHUSD": {
       "asset_class": "crypto",
-      "bias_score": -9,
-      "note": "MVRV_Value_ExInflow_ExtremeFearContrarian_ETF-25",
+      "bias_score": -30,
+      "note": "ExInflow_ExtremeFearContrarian_ETF-25_VIXBack",
       "cot": {
         "ok": false
       },
@@ -116,15 +113,12 @@
       "cot_score": 0.0,
       "etf_score": -25.0,
       "onchain": {
-        "mvrv": 0.851,
-        "mvrv_pts": 30.0,
-        "netflow7_ratio": 0.0708,
-        "netflow_pts": -12.8,
-        "ex_supply_30d_pct": -3.42,
+        "netflow7_ratio": 0.0603,
+        "netflow_pts": -10.9,
         "stablecoins_30d_pct": -5.73,
         "funding_8h": 0.0,
         "funding_pts": -0.0,
-        "fear_greed": 11.0
+        "fear_greed": 13.0
       }
     },
     "XAGUSD": {
