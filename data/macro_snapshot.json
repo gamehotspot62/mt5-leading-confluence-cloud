@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-25T21:55:08Z",
+  "updated_utc": "2026-11-25T22:51:38Z",
   "global_bias": -11,
   "global_regime": {
     "vix": 28.29,
@@ -10,17 +10,17 @@
     "hy_oas_chg20": 0.54,
     "real_10y_yield": 2.79,
     "real_10y_chg20": 0.13,
-    "yield_curve_10y2y": 0.28,
+    "yield_curve_10y2y": 0.24,
     "fed_net_liq_trillion": 5.825,
     "fed_net_liq_4w_pct": 1.37,
-    "dxy": 103.71,
-    "dxy_ret20_pct": 1.48,
+    "dxy": 103.69,
+    "dxy_ret20_pct": 1.47,
     "breadth_rsp_spy_20d_pct": 6.92,
     "credit_hyg_tlt_20d_pct": -2.88,
     "tech_qqq_xlp_20d_pct": -17.8,
     "stablecoins": {
-      "total_usd_b": 282.5,
-      "chg_7d_pct": -1.31,
+      "total_usd_b": 282.49,
+      "chg_7d_pct": -1.32,
       "chg_30d_pct": -5.88
     },
     "fear_greed": {
@@ -31,7 +31,7 @@
   "symbols": {
     "XAUUSD": {
       "asset_class": "metals",
-      "bias_score": -23,
+      "bias_score": -22,
       "note": "COT100_ETF-25_VIXBack",
       "cot": {
         "ok": true,
@@ -46,7 +46,7 @@
         {
           "ticker": "GLD",
           "ok": true,
-          "cmf10": -0.428,
+          "cmf10": -0.427,
           "ret10_pct": -10.33,
           "score": -25.0
         }
@@ -92,8 +92,8 @@
         "netflow_pts": 4.0,
         "ex_supply_30d_pct": 0.83,
         "stablecoins_30d_pct": -5.88,
-        "funding_8h": 2e-05,
-        "funding_pts": -0.4,
+        "funding_8h": 3e-05,
+        "funding_pts": -0.6,
         "fear_greed": 13.0
       }
     },
@@ -144,7 +144,7 @@
         {
           "ticker": "SLV",
           "ok": true,
-          "cmf10": -0.369,
+          "cmf10": -0.368,
           "ret10_pct": -20.47,
           "score": -25.0
         }
@@ -230,7 +230,7 @@
     "USDJPY": {
       "asset_class": "fx",
       "bias_score": -2,
-      "note": "COT88_ETF-5_VIXBack",
+      "note": "COT88_ETF-6_VIXBack",
       "cot": {
         "ok": true,
         "report_date": "2026-11-17",
@@ -244,7 +244,7 @@
         {
           "ticker": "FXY",
           "ok": true,
-          "cmf10": -0.137,
+          "cmf10": -0.138,
           "ret10_pct": 0.45,
           "score": -5.5
         }
@@ -269,9 +269,9 @@
         {
           "ticker": "SPY",
           "ok": true,
-          "cmf10": -0.221,
+          "cmf10": -0.22,
           "ret10_pct": -5.67,
-          "score": -18.5
+          "score": -18.4
         },
         {
           "ticker": "RSP",
@@ -301,13 +301,13 @@
         {
           "ticker": "QQQ",
           "ok": true,
-          "cmf10": -0.171,
+          "cmf10": -0.17,
           "ret10_pct": -8.18,
-          "score": -19.7
+          "score": -19.6
         }
       ],
       "cot_score": 15.9,
-      "etf_score": -19.7
+      "etf_score": -19.6
     }
   }
 }
