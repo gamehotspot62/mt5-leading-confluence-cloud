@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-26T18:37:19Z",
+  "updated_utc": "2026-11-26T19:50:15Z",
   "global_bias": -11,
   "global_regime": {
     "vix": 26.8,
@@ -13,8 +13,8 @@
     "yield_curve_10y2y": 0.24,
     "fed_net_liq_trillion": 5.825,
     "fed_net_liq_4w_pct": 1.37,
-    "dxy": 103.77,
-    "dxy_ret20_pct": 1.69,
+    "dxy": 103.78,
+    "dxy_ret20_pct": 1.7,
     "breadth_rsp_spy_20d_pct": 6.92,
     "credit_hyg_tlt_20d_pct": -2.88,
     "tech_qqq_xlp_20d_pct": -17.8,
@@ -46,7 +46,7 @@
         {
           "ticker": "GLD",
           "ok": true,
-          "cmf10": -0.426,
+          "cmf10": -0.425,
           "ret10_pct": -10.33,
           "score": -25.0
         }
@@ -71,14 +71,14 @@
         {
           "ticker": "IBIT",
           "ok": true,
-          "cmf10": -0.295,
+          "cmf10": -0.294,
           "ret10_pct": -19.34,
           "score": -25.0
         },
         {
           "ticker": "FBTC",
           "ok": true,
-          "cmf10": -0.308,
+          "cmf10": -0.307,
           "ret10_pct": -19.31,
           "score": -25.0
         }
@@ -108,13 +108,13 @@
         {
           "ticker": "ETHA",
           "ok": true,
-          "cmf10": -0.23,
+          "cmf10": -0.229,
           "ret10_pct": -18.89,
-          "score": -22.4
+          "score": -22.3
         }
       ],
       "cot_score": 0.0,
-      "etf_score": -22.4,
+      "etf_score": -22.3,
       "onchain": {
         "mvrv": 0.845,
         "mvrv_pts": 30.0,
@@ -144,7 +144,7 @@
         {
           "ticker": "SLV",
           "ok": true,
-          "cmf10": -0.367,
+          "cmf10": -0.366,
           "ret10_pct": -20.47,
           "score": -25.0
         }
@@ -271,7 +271,7 @@
           "ok": true,
           "cmf10": -0.219,
           "ret10_pct": -5.67,
-          "score": -18.4
+          "score": -18.3
         },
         {
           "ticker": "RSP",
@@ -303,11 +303,11 @@
           "ok": true,
           "cmf10": -0.168,
           "ret10_pct": -8.18,
-          "score": -19.6
+          "score": -19.5
         }
       ],
       "cot_score": 15.9,
-      "etf_score": -19.6
+      "etf_score": -19.5
     }
   }
 }
