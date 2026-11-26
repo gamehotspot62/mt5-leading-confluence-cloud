@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-26T03:12:06Z",
+  "updated_utc": "2026-11-26T04:20:38Z",
   "global_bias": -11,
   "global_regime": {
     "vix": 28.29,
@@ -13,14 +13,14 @@
     "yield_curve_10y2y": 0.24,
     "fed_net_liq_trillion": 5.825,
     "fed_net_liq_4w_pct": 1.37,
-    "dxy": 103.77,
-    "dxy_ret20_pct": 1.7,
+    "dxy": 103.82,
+    "dxy_ret20_pct": 1.75,
     "breadth_rsp_spy_20d_pct": 6.92,
     "credit_hyg_tlt_20d_pct": -2.88,
     "tech_qqq_xlp_20d_pct": -17.8,
     "stablecoins": {
       "total_usd_b": 282.22,
-      "chg_7d_pct": -1.06,
+      "chg_7d_pct": -1.05,
       "chg_30d_pct": -5.75
     },
     "fear_greed": {
@@ -92,15 +92,15 @@
         "netflow_pts": 0.7,
         "ex_supply_30d_pct": 0.69,
         "stablecoins_30d_pct": -5.75,
-        "funding_8h": 0.000133,
-        "funding_pts": -2.7,
+        "funding_8h": 0.000128,
+        "funding_pts": -2.6,
         "fear_greed": 11.0
       }
     },
     "ETHUSD": {
       "asset_class": "crypto",
-      "bias_score": -25,
-      "note": "ExInflow_ExtremeFearContrarian_ETF-22_VIXBack",
+      "bias_score": -9,
+      "note": "MVRV_Value_ExInflow_ExtremeFearContrarian_ETF-22",
       "cot": {
         "ok": false
       },
@@ -116,6 +116,8 @@
       "cot_score": 0.0,
       "etf_score": -22.4,
       "onchain": {
+        "mvrv": 0.845,
+        "mvrv_pts": 30.0,
         "netflow7_ratio": 0.0655,
         "netflow_pts": -11.8,
         "ex_supply_30d_pct": -2.78,
