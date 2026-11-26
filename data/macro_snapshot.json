@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-26T21:51:56Z",
+  "updated_utc": "2026-11-26T22:53:45Z",
   "global_bias": -11,
   "global_regime": {
     "vix": 26.8,
@@ -13,8 +13,8 @@
     "yield_curve_10y2y": 0.24,
     "fed_net_liq_trillion": 5.825,
     "fed_net_liq_4w_pct": 1.37,
-    "dxy": 103.79,
-    "dxy_ret20_pct": 1.71,
+    "dxy": 103.76,
+    "dxy_ret20_pct": 1.68,
     "breadth_rsp_spy_20d_pct": 6.92,
     "credit_hyg_tlt_20d_pct": -2.88,
     "tech_qqq_xlp_20d_pct": -17.8,
@@ -122,8 +122,8 @@
         "netflow_pts": -11.8,
         "ex_supply_30d_pct": -2.78,
         "stablecoins_30d_pct": -5.75,
-        "funding_8h": 1e-06,
-        "funding_pts": -0.0,
+        "funding_8h": 4e-06,
+        "funding_pts": -0.1,
         "fear_greed": 11.0
       }
     },
@@ -204,7 +204,7 @@
     },
     "GBPUSD": {
       "asset_class": "fx",
-      "bias_score": -18,
+      "bias_score": -17,
       "note": "COT22_ETF-22_VIXBack",
       "cot": {
         "ok": true,
