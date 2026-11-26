@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-25T23:46:24Z",
+  "updated_utc": "2026-11-26T00:37:42Z",
   "global_bias": -11,
   "global_regime": {
     "vix": 28.29,
@@ -19,13 +19,13 @@
     "credit_hyg_tlt_20d_pct": -2.88,
     "tech_qqq_xlp_20d_pct": -17.8,
     "stablecoins": {
-      "total_usd_b": 282.46,
-      "chg_7d_pct": -1.33,
+      "total_usd_b": 282.48,
+      "chg_7d_pct": -1.32,
       "chg_30d_pct": -5.89
     },
     "fear_greed": {
-      "value": 13.0,
-      "avg7d": 11.4
+      "value": 11.0,
+      "avg7d": 11.6
     }
   },
   "symbols": {
@@ -56,8 +56,8 @@
     },
     "BTCUSD": {
       "asset_class": "crypto",
-      "bias_score": -19,
-      "note": "MVRV_Value_ExNeut_ExtremeFearContrarian_COT3",
+      "bias_score": -35,
+      "note": "ExNeut_ExtremeFearContrarian_COT3_ETF-25",
       "cot": {
         "ok": true,
         "report_date": "2026-11-17",
@@ -86,21 +86,18 @@
       "cot_score": -25.0,
       "etf_score": -25.0,
       "onchain": {
-        "mvrv": 1.126,
-        "mvrv_pts": 30.0,
-        "netflow7_ratio": -0.022,
-        "netflow_pts": 4.0,
-        "ex_supply_30d_pct": 0.83,
+        "netflow7_ratio": -0.0107,
+        "netflow_pts": 1.9,
         "stablecoins_30d_pct": -5.89,
-        "funding_8h": 4e-05,
-        "funding_pts": -0.8,
-        "fear_greed": 13.0
+        "funding_8h": 6.9e-05,
+        "funding_pts": -1.4,
+        "fear_greed": 11.0
       }
     },
     "ETHUSD": {
       "asset_class": "crypto",
-      "bias_score": -6,
-      "note": "MVRV_Value_ExInflow_ExtremeFearContrarian_ETF-22",
+      "bias_score": -29,
+      "note": "ExInflow_ExtremeFearContrarian_ETF-22_VIXBack",
       "cot": {
         "ok": false
       },
@@ -116,15 +113,12 @@
       "cot_score": 0.0,
       "etf_score": -22.4,
       "onchain": {
-        "mvrv": 0.838,
-        "mvrv_pts": 30.0,
-        "netflow7_ratio": 0.0533,
-        "netflow_pts": -9.6,
-        "ex_supply_30d_pct": -3.4,
+        "netflow7_ratio": 0.0587,
+        "netflow_pts": -10.6,
         "stablecoins_30d_pct": -5.89,
         "funding_8h": 0.0,
         "funding_pts": -0.0,
-        "fear_greed": 13.0
+        "fear_greed": 11.0
       }
     },
     "XAGUSD": {
