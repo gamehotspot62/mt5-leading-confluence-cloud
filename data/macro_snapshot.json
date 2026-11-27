@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-27T02:28:11Z",
+  "updated_utc": "2026-11-27T03:35:12Z",
   "global_bias": -11,
   "global_regime": {
     "vix": 26.8,
@@ -14,13 +14,13 @@
     "fed_net_liq_trillion": 5.825,
     "fed_net_liq_4w_pct": 1.37,
     "dxy": 103.7,
-    "dxy_ret20_pct": 1.63,
+    "dxy_ret20_pct": 1.62,
     "breadth_rsp_spy_20d_pct": 6.92,
     "credit_hyg_tlt_20d_pct": -2.88,
     "tech_qqq_xlp_20d_pct": -17.8,
     "stablecoins": {
-      "total_usd_b": 281.88,
-      "chg_7d_pct": -0.55,
+      "total_usd_b": 281.89,
+      "chg_7d_pct": -0.54,
       "chg_30d_pct": -5.87
     },
     "fear_greed": {
@@ -56,8 +56,8 @@
     },
     "BTCUSD": {
       "asset_class": "crypto",
-      "bias_score": -38,
-      "note": "ExNeut_ExtremeFearContrarian_COT3_ETF-25",
+      "bias_score": -21,
+      "note": "MVRV_Value_ExNeut_ExtremeFearContrarian_COT3",
       "cot": {
         "ok": true,
         "report_date": "2026-11-17",
@@ -86,19 +86,21 @@
       "cot_score": -25.0,
       "etf_score": -25.0,
       "onchain": {
-        "netflow7_ratio": 0.0007,
-        "netflow_pts": -0.1,
+        "mvrv": 1.139,
+        "mvrv_pts": 30.0,
+        "netflow7_ratio": -0.0064,
+        "netflow_pts": 1.2,
         "ex_supply_30d_pct": 1.21,
         "stablecoins_30d_pct": -5.87,
-        "funding_8h": 0.0,
+        "funding_8h": 1e-06,
         "funding_pts": -0.0,
         "fear_greed": 12.0
       }
     },
     "ETHUSD": {
       "asset_class": "crypto",
-      "bias_score": -30,
-      "note": "ExInflow_ExtremeFearContrarian_ETF-22_VIXBack",
+      "bias_score": -7,
+      "note": "MVRV_Value_ExInflow_ExtremeFearContrarian_ETF-22",
       "cot": {
         "ok": false
       },
@@ -114,10 +116,13 @@
       "cot_score": 0.0,
       "etf_score": -22.3,
       "onchain": {
-        "netflow7_ratio": 0.0715,
-        "netflow_pts": -12.9,
+        "mvrv": 0.844,
+        "mvrv_pts": 30.0,
+        "netflow7_ratio": 0.0565,
+        "netflow_pts": -10.2,
+        "ex_supply_30d_pct": -2.98,
         "stablecoins_30d_pct": -5.87,
-        "funding_8h": 8e-06,
+        "funding_8h": 1.2e-05,
         "funding_pts": -0.2,
         "fear_greed": 12.0
       }
