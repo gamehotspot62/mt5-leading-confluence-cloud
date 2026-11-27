@@ -1,6 +1,6 @@
 {
-  "updated_utc": "2026-11-27T20:38:59Z",
-  "global_bias": 1,
+  "updated_utc": "2026-11-27T21:39:53Z",
+  "global_bias": 2,
   "global_regime": {
     "vix": 23.81,
     "vix3m": 23.82,
@@ -8,20 +8,20 @@
     "vix_state": "CONTANGO_RISK_ON",
     "hy_oas_pct": 3.77,
     "hy_oas_chg20": 0.51,
-    "real_10y_yield": 2.79,
-    "real_10y_chg20": 0.13,
+    "real_10y_yield": 2.73,
+    "real_10y_chg20": 0.09,
     "yield_curve_10y2y": 0.24,
-    "fed_net_liq_trillion": 5.824,
-    "fed_net_liq_4w_pct": 1.37,
-    "dxy": 104.03,
-    "dxy_ret20_pct": 1.95,
+    "fed_net_liq_trillion": 5.83,
+    "fed_net_liq_4w_pct": 1.46,
+    "dxy": 104.05,
+    "dxy_ret20_pct": 1.97,
     "breadth_rsp_spy_20d_pct": 4.84,
     "credit_hyg_tlt_20d_pct": -0.98,
     "tech_qqq_xlp_20d_pct": -13.41,
     "stablecoins": {
       "total_usd_b": 281.93,
       "chg_7d_pct": -0.53,
-      "chg_30d_pct": -5.85
+      "chg_30d_pct": -5.86
     },
     "fear_greed": {
       "value": 12.0,
@@ -31,7 +31,7 @@
   "symbols": {
     "XAUUSD": {
       "asset_class": "metals",
-      "bias_score": -25,
+      "bias_score": -23,
       "note": "COT100_ETF-25_VIXCont",
       "cot": {
         "ok": true,
@@ -78,20 +78,20 @@
         {
           "ticker": "FBTC",
           "ok": true,
-          "cmf10": -0.272,
+          "cmf10": -0.273,
           "ret10_pct": -16.17,
           "score": -24.3
         }
       ],
       "cot_score": -25.0,
-      "etf_score": -23.9,
+      "etf_score": -24.0,
       "onchain": {
         "mvrv": 1.139,
         "mvrv_pts": 30.0,
         "netflow7_ratio": -0.0064,
         "netflow_pts": 1.2,
         "ex_supply_30d_pct": 1.21,
-        "stablecoins_30d_pct": -5.85,
+        "stablecoins_30d_pct": -5.86,
         "funding_8h": -4e-06,
         "funding_pts": 0.1,
         "fear_greed": 12.0
@@ -99,7 +99,7 @@
     },
     "ETHUSD": {
       "asset_class": "crypto",
-      "bias_score": -4,
+      "bias_score": -3,
       "note": "MVRV_Value_ExInflow_ExtremeFearContrarian_ETF-25",
       "cot": {
         "ok": false
@@ -121,7 +121,7 @@
         "netflow7_ratio": 0.0565,
         "netflow_pts": -10.2,
         "ex_supply_30d_pct": -2.98,
-        "stablecoins_30d_pct": -5.85,
+        "stablecoins_30d_pct": -5.86,
         "funding_8h": -0.000115,
         "funding_pts": 2.3,
         "fear_greed": 12.0
@@ -129,7 +129,7 @@
     },
     "XAGUSD": {
       "asset_class": "metals",
-      "bias_score": -18,
+      "bias_score": -16,
       "note": "COT98_ETF-25_VIXCont",
       "cot": {
         "ok": true,
@@ -144,7 +144,7 @@
         {
           "ticker": "SLV",
           "ok": true,
-          "cmf10": -0.323,
+          "cmf10": -0.322,
           "ret10_pct": -12.68,
           "score": -25.0
         }
@@ -169,17 +169,17 @@
         {
           "ticker": "USO",
           "ok": true,
-          "cmf10": -0.091,
+          "cmf10": -0.092,
           "ret10_pct": -5.68,
-          "score": -12.6
+          "score": -12.7
         }
       ],
       "cot_score": 16.6,
-      "etf_score": -12.6
+      "etf_score": -12.7
     },
     "EURUSD": {
       "asset_class": "fx",
-      "bias_score": -17,
+      "bias_score": -15,
       "note": "COT1_ETF-18_VIXCont",
       "cot": {
         "ok": true,
@@ -204,7 +204,7 @@
     },
     "GBPUSD": {
       "asset_class": "fx",
-      "bias_score": -15,
+      "bias_score": -14,
       "note": "COT22_ETF-22_VIXCont",
       "cot": {
         "ok": true,
@@ -219,7 +219,7 @@
         {
           "ticker": "FXB",
           "ok": true,
-          "cmf10": -0.453,
+          "cmf10": -0.454,
           "ret10_pct": -0.98,
           "score": -21.9
         }
@@ -229,7 +229,7 @@
     },
     "USDJPY": {
       "asset_class": "fx",
-      "bias_score": 11,
+      "bias_score": 10,
       "note": "COT88_ETF-4_VIXCont",
       "cot": {
         "ok": true,
@@ -254,7 +254,7 @@
     },
     "US500": {
       "asset_class": "index",
-      "bias_score": -5,
+      "bias_score": -4,
       "note": "COT26_ETF-10_VIXCont",
       "cot": {
         "ok": true,
@@ -276,17 +276,17 @@
         {
           "ticker": "RSP",
           "ok": true,
-          "cmf10": -0.112,
+          "cmf10": -0.104,
           "ret10_pct": -1.06,
-          "score": -6.6
+          "score": -6.3
         }
       ],
       "cot_score": -19.6,
-      "etf_score": -9.8
+      "etf_score": -9.6
     },
     "US100": {
       "asset_class": "index",
-      "bias_score": -5,
+      "bias_score": -4,
       "note": "COT77_ETF-14_VIXCont",
       "cot": {
         "ok": true,
