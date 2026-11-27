@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-27T22:40:44Z",
+  "updated_utc": "2026-11-27T23:37:14Z",
   "global_bias": 2,
   "global_regime": {
     "vix": 23.81,
@@ -92,14 +92,14 @@
         "netflow_pts": 1.2,
         "ex_supply_30d_pct": 1.21,
         "stablecoins_30d_pct": -5.85,
-        "funding_8h": -4e-06,
-        "funding_pts": 0.1,
+        "funding_8h": -2e-06,
+        "funding_pts": 0.0,
         "fear_greed": 12.0
       }
     },
     "ETHUSD": {
       "asset_class": "crypto",
-      "bias_score": -3,
+      "bias_score": -4,
       "note": "MVRV_Value_ExInflow_ExtremeFearContrarian_ETF-25",
       "cot": {
         "ok": false
@@ -122,8 +122,8 @@
         "netflow_pts": -10.2,
         "ex_supply_30d_pct": -2.98,
         "stablecoins_30d_pct": -5.85,
-        "funding_8h": -0.000102,
-        "funding_pts": 2.0,
+        "funding_8h": -2.7e-05,
+        "funding_pts": 0.5,
         "fear_greed": 12.0
       }
     },
