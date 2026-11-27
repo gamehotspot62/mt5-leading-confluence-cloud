@@ -1,10 +1,10 @@
 {
-  "updated_utc": "2026-11-27T09:48:56Z",
+  "updated_utc": "2026-11-27T10:53:18Z",
   "global_bias": -1,
   "global_regime": {
-    "vix": 24.56,
+    "vix": 24.6,
     "vix3m": 26.29,
-    "vix_vix3m_ratio": 0.934,
+    "vix_vix3m_ratio": 0.936,
     "vix_state": "CONTANGO_RISK_ON",
     "hy_oas_pct": 3.72,
     "hy_oas_chg20": 0.54,
@@ -13,14 +13,14 @@
     "yield_curve_10y2y": 0.24,
     "fed_net_liq_trillion": 5.825,
     "fed_net_liq_4w_pct": 1.37,
-    "dxy": 103.83,
-    "dxy_ret20_pct": 1.75,
+    "dxy": 103.81,
+    "dxy_ret20_pct": 1.74,
     "breadth_rsp_spy_20d_pct": 6.92,
     "credit_hyg_tlt_20d_pct": -2.88,
     "tech_qqq_xlp_20d_pct": -17.8,
     "stablecoins": {
-      "total_usd_b": 281.88,
-      "chg_7d_pct": -0.55,
+      "total_usd_b": 281.89,
+      "chg_7d_pct": -0.54,
       "chg_30d_pct": -5.87
     },
     "fear_greed": {
@@ -92,7 +92,7 @@
         "netflow_pts": 1.2,
         "ex_supply_30d_pct": 1.21,
         "stablecoins_30d_pct": -5.87,
-        "funding_8h": 4e-06,
+        "funding_8h": 3e-06,
         "funding_pts": -0.1,
         "fear_greed": 12.0
       }
@@ -122,8 +122,8 @@
         "netflow_pts": -10.2,
         "ex_supply_30d_pct": -2.98,
         "stablecoins_30d_pct": -5.87,
-        "funding_8h": -1e-05,
-        "funding_pts": 0.2,
+        "funding_8h": -1.3e-05,
+        "funding_pts": 0.3,
         "fear_greed": 12.0
       }
     },
